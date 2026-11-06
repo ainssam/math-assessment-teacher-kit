@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import re
+from functools import lru_cache
 
 
 SUBJECT_PATTERNS: tuple[tuple[str, str, str], ...] = (
@@ -27,6 +29,25 @@ SUBJECT_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("2015", "실용 수학", r"실용\s*수학"),
     ("2015", "수학", r"(?m)^\s*(?:(?:[#*•·-]|\d+[.)]|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+[.)]?)\s*)?(?:과목\s*명?\s*[:：]?\s*)?[<\[]?수학[>\]]?\s*$"),
 )
+
+
+@lru_cache(maxsize=None)
+def semester_course_plan_pattern(subject_pattern: str) -> re.Pattern[str]:
+    grade = r"(?:\(?[1-3]\)?\s*학년\s*)?"
+    return re.compile(
+        rf"20\d{{2}}\s*학년도\s*{grade}\(?[12]\)?\s*학기\s*{grade}"
+        rf"[<\[(]?\s*(?:{subject_pattern.removeprefix('(?m)')})\s*[>\])]?\s*"
+        r"(?:과목|교과|과)?\s*(?:교수\s*[·‧∙-]?\s*학습\s*[·‧∙-]?\s*(?:및\s*)?)?"
+        r"평가\s*(?:운영\s*)?계획(?:서)?",
+        re.IGNORECASE,
+    )
+
+
+def is_semester_course_plan_heading(line: str, subject_pattern: str) -> bool:
+    if "학년도" not in line or "학기" not in line:
+        return False
+    visible = html.unescape(re.sub(r"</?[A-Za-z][^<>]*>", " ", line))
+    return semester_course_plan_pattern(subject_pattern).fullmatch(visible.strip(" #|\t")) is not None
 
 
 def subject_hits(text: str) -> list[dict[str, str]]:
@@ -58,6 +79,7 @@ def subject_hits(text: str) -> list[dict[str, str]]:
             label_hit = bool(
                 re.search(r"과목\s*명?|교과\s*목?", line)
                 or re.match(r"\s*#{1,6}\s*", line)
+                or is_semester_course_plan_heading(line, line_pattern)
                 or re.search(rf"[<\[(]\s*(?:{line_pattern})\s*[>\])]", line, flags=re.IGNORECASE)
                 or ("|" in line and re.search(r"과목\s*명?|교과\s*목?", previous_lines))
             )

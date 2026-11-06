@@ -7,7 +7,10 @@ from scripts.build_math_assessment_publish_db import (
     task_name_is_rejected,
 )
 from scripts.build_math_assessment_manifest import classify
+from scripts.build_math_assessment_evidence_index import evidence_records
+from scripts.build_strict_math_shortlist import evidence_strength
 from scripts.math_subject_aliases import subject_hits
+from scripts.merge_math_assessment_recovery_catalog import merged_status
 
 
 def test_latin_roman_numerals_are_separate_in_filenames_and_headings() -> None:
@@ -16,6 +19,24 @@ def test_latin_roman_numerals_are_separate_in_filenames_and_headings() -> None:
     assert {hit["subject"] for hit in subject_hits("과목명: [미적분 I]")} == {"미적분Ⅰ"}
     assert {hit["subject"] for hit in subject_hits("과목명: [미적분 II]")} == {"미적분Ⅱ"}
     assert {hit["subject"] for hit in subject_hits("과목명: [공통 수학 II]")} == {"공통수학2"}
+
+
+def test_explicit_semester_plan_titles_survive_plain_text_and_table_conversion() -> None:
+    for heading in (
+        "2026학년도 2학기 2학년 미적분Ⅰ교수학습‧평가 계획서",
+        '<tr><td colspan="2">2026학년도 2학년 2학기 미적분Ⅰ과 평가 계획</td></tr>',
+    ):
+        source = {"text": f"{heading}\n수행평가 세부 기준\n함수의 변화율을 분석하는 보고서", "extract_status": "ok"}
+        evidence, = evidence_records(source)
+        assert evidence["subject"] == "미적분Ⅰ"
+        assert "subject_label" in evidence_strength(evidence)[1]
+    assert subject_hits("2026학년도 2학기 수학 수업에서 미적분Ⅰ 평가 계획을 참고한다.") == []
+
+
+def test_targeted_recovery_preserves_unknown_without_positive_evidence() -> None:
+    assert merged_status("offering_unknown", "not_found_in_collected_plans", evidence_only=True) == "offering_unknown"
+    assert merged_status("offering_unknown", "found", evidence_only=True) == "found"
+    assert merged_status("offering_unknown", "not_found_in_collected_plans", evidence_only=False) == "not_found_in_collected_plans"
 
 
 def test_plain_text_preserves_html_table_cells() -> None:

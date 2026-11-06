@@ -7,10 +7,14 @@ import collections
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 
-from math_subject_aliases import SUBJECT_PATTERNS
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.math_subject_aliases import SUBJECT_PATTERNS, is_semester_course_plan_heading
 
 
 CODE_KEYS = {
@@ -53,7 +57,9 @@ def evidence_strength(record: dict[str, object]) -> tuple[int, list[str]]:
         rf"\|\s*(?:과목\s*명?|교과\s*목?)\s*\|\s*{pattern}\s*\|",
         rf"(?m)^\s*#+\s*\d{{4}}\s*학년도[^\n]{{0,180}}[<(\[]\s*{pattern}\s*[>)\]][^\n]{{0,120}}평가\s*계획[^\n]*$",
     )
-    if any(re.search(label, text, flags=re.IGNORECASE) for label in label_patterns):
+    if any(re.search(label, text, flags=re.IGNORECASE) for label in label_patterns) or any(
+        is_semester_course_plan_heading(line, pattern) for line in text.splitlines()
+    ):
         strength += 4
         reasons.append("subject_label")
     if re.search(rf"(?:선택\s*과목|교과)\s*[:：]?\s*{pattern}", text, flags=re.IGNORECASE):

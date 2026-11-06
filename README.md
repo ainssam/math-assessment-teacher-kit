@@ -42,6 +42,15 @@ pnpm dev
 | 검색 API와 DB 연결 읽기 | `services/math-assessment-api/app/` |
 | 제목, 과목 경계, 배점, 원문 표의 검증 로직 읽기 | `scripts/`의 수집·추출·감사 코드 |
 
+## 추출 코드를 수정한 뒤 확인하기
+
+아래 테스트는 저장소의 가상 입력만으로 과목명, 수행평가 제목, 배점, 표 구조를 점검합니다. 운영 사례 수와 출처를 대조하는 테스트에는 별도로 수집한 DB가 필요합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r services/math-assessment-api/requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q services/math-assessment-api/tests/test_publish_builder.py services/math-assessment-api/tests/test_detail_parser.py
+```
+
 ## 이용 범위와 도움 요청
 
 이 저장소의 자체 소스코드, 안내 문서, 가상 예제는 MIT 라이선스로 이용할 수 있습니다. 의존 패키지의 권리는 각 패키지 라이선스를 따릅니다. 운영 서비스의 학교 자료와 데이터베이스는 별도로 관리합니다. [MIT 라이선스](LICENSE) · [출처와 공개 기준](docs/SOURCE_POLICY.md)

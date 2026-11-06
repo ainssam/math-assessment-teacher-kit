@@ -13,10 +13,15 @@ import glob
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 
-from math_subject_aliases import SUBJECT_PATTERNS, subject_hits as detect_subject_hits
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.math_subject_aliases import SUBJECT_PATTERNS, is_semester_course_plan_heading
+from scripts.math_subject_aliases import subject_hits as detect_subject_hits
 
 
 ASSESSMENT_ANCHORS = re.compile(
@@ -161,7 +166,11 @@ def subject_position(text: str, subject: str) -> int | None:
         if line_end < 0:
             line_end = len(text)
         line = text[line_start:line_end]
-        explicit_label = bool(re.match(r"\s*#{1,6}\s*", line) or re.search(r"과목\s*명?|교과\s*목?", line))
+        explicit_label = bool(
+            re.match(r"\s*#{1,6}\s*", line)
+            or re.search(r"과목\s*명?|교과\s*목?", line)
+            or is_semester_course_plan_heading(line, pattern)
+        )
         nearby = sum(abs(anchor - match.start()) <= 4500 for anchor in anchors)
         return int(explicit_label), nearby, -match.start()
     return max(matches, key=proximity).start()
