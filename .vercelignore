@@ -1,0 +1,32 @@
+# Local source corpus, recovery candidates, and audit artifacts are never deploy inputs.
+data/**
+참고자료/**
+.tmp/**
+tmp/**
+output/**
+reports/**
+.generated-backup/**
+.vercel-topic-finder-backup/**
+.dorms-check/**
+.venv/**
+.pytest_cache/**
+.ruff_cache/**
+
+# Build caches and local dependencies.
+node_modules
+**/node_modules
+apps/math-assessment-web/.next
+apps/math-assessment-web/.next-*-audit-backup
+apps/web
+services/api
+
+# Runtime receives only the compressed catalog archive parts, never raw SQLite files.
+services/math-assessment-api/data/math_assessment_catalog.sqlite
+services/math-assessment-api/data/math_assessment_catalog_detail.sqlite
+
+# Local secrets and transient diagnostic output.
+.env
+.env.*
+!.env.example
+*.log
+tmp-*

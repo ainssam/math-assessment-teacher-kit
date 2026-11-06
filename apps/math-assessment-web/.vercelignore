@@ -1,0 +1,5 @@
+# This service is built remotely; local output and dependencies are not source inputs.
+.next/**
+.next-*-audit-backup/**
+node_modules/**
+.dorms-check/**

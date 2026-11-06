@@ -1,0 +1,35 @@
+{
+  "name": "math-assessment-designer",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "npm --workspace @math-assessment-designer/web run dev",
+    "dev:api": "node scripts/api.mjs",
+    "test": "npm run test:api && npm run test:web && npm run test:boundary",
+    "test:api": "node scripts/run-python.mjs -m pytest",
+    "test:web": "npm --workspace @math-assessment-designer/web run test",
+    "test:boundary": "node scripts/check-product-boundary.mjs",
+    "lint": "npm run lint:api && npm run lint:web",
+    "lint:api": "node scripts/run-python.mjs -m ruff check services/math-assessment-api",
+    "lint:web": "npm --workspace @math-assessment-designer/web run lint",
+    "build": "npm --workspace @math-assessment-designer/web run build",
+    "audit:renderer": "node apps/math-assessment-web/scripts/audit-source-table-renderer-all.mjs",
+    "audit:data": "node scripts/run-python.mjs scripts/audit_math_assessment_titles_full.py --database data/publish/math_assessment_catalog_detail.sqlite --summary data/derived/math_assessment_title_full_detail_audit.json --queue data/derived/math_assessment_title_full_detail_review_queue.csv && node scripts/run-python.mjs scripts/audit_math_assessment_subject_alignment.py && node scripts/run-python.mjs scripts/audit_math_assessment_detail_db.py --database data/publish/math_assessment_catalog_detail.sqlite --output data/derived/math_assessment_detail_db_audit.json && node scripts/run-python.mjs scripts/audit_math_assessment_publication_gate.py --database data/publish/math_assessment_catalog_detail.sqlite --output data/derived/math_assessment_publication_gate_audit.json --queue data/derived/math_assessment_publication_manual_queue.csv && node scripts/run-python.mjs scripts/audit_math_assessment_table_structure.py --database data/publish/math_assessment_catalog_detail.sqlite --output data/derived/math_assessment_table_structure_audit.json --queue data/derived/math_assessment_table_structure_queue.csv && node scripts/run-python.mjs scripts/audit_math_assessment_release_precision.py --database data/publish/math_assessment_catalog_detail.sqlite --output data/derived/math_assessment_release_precision_audit.json --queue data/derived/math_assessment_release_precision_review_queue.csv",
+    "package:vercel": "node scripts/run-python.mjs scripts/package_math_assessment_vercel_data.py",
+    "stage:vercel": "node scripts/run-python.mjs scripts/stage_math_assessment_vercel.py",
+    "deploy:prepare": "npm run audit:data && npm run audit:renderer && npm run verify && npm run package:vercel && npm run stage:vercel",
+    "verify": "npm run test && npm run lint && npm run build"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "devDependencies": {
+    "kordoc": "3.13.0"
+  },
+  "license": "MIT"
+}

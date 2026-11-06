@@ -1,0 +1,5 @@
+# The runtime materializes only the compressed archive parts in data/.
+__pycache__/**
+app/__pycache__/**
+data/math_assessment_catalog.sqlite
+data/math_assessment_catalog_detail.sqlite
