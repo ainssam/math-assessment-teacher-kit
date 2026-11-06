@@ -63,6 +63,16 @@ def extract_semesters(text: str) -> list[int]:
     return sorted({int(value) for value in re.findall(r"(?<!\d)([12])\s*학기", text)})
 
 
+def confirmed_cover_grade(source: dict[str, object], text: str) -> int | None:
+    """Use an explicit cover heading when identical PDFs carry different names."""
+    if source.get("confirmed_semester") not in (1, 2) or Path(source_key(source)).suffix.lower() != ".pdf":
+        return None
+    heading = re.search(r"(?m)^\s*20\d{2}\s*학년도\s*([123])\s*학년\s*([12])\s*학기", text[:400])
+    if heading and int(heading[2]) == source["confirmed_semester"]:
+        return int(heading[1])
+    return None
+
+
 def transition_curriculum(year: int, grade: int | None) -> str | None:
     if year <= 2024:
         return "2015"
@@ -138,6 +148,7 @@ def main() -> None:
 
     source_status: dict[str, str] = {}
     school_source_status: dict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
+    sources_with_cover_grade: dict[tuple[str, str], list[tuple[int, dict[str, object]]]] = collections.defaultdict(list)
     for record in read_jsonl(args.source_index):
         source = record.get("source") or {}
         if not isinstance(source, dict):
@@ -149,6 +160,22 @@ def main() -> None:
         school = school_key(source)
         if school:
             school_source_status[school][status] += 1
+            grade = confirmed_cover_grade(source, str(record.get("text") or ""))
+            digest = str(record.get("sha256") or "")
+            if grade and digest:
+                sources_with_cover_grade[(school, digest)].append((grade, source))
+
+    preferred_sources = {}
+    for identity, options in sources_with_cover_grade.items():
+        cover_grades = {grade for grade, _ in options}
+        declared_grades = {tuple(extract_grades(str(source.get("candidate_name") or ""))) for _, source in options}
+        if len(cover_grades) != 1 or len(declared_grades) <= 1:
+            continue
+        grade = next(iter(cover_grades))
+        preferred = next((source for _, source in options
+                          if extract_grades(str(source.get("candidate_name") or "")) == [grade]), None)
+        if preferred:
+            preferred_sources[identity] = preferred
 
     explicit_sources: dict[tuple[str, str], list[str]] = collections.defaultdict(list)
     with args.manifest.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -165,6 +192,10 @@ def main() -> None:
         source = record.get("source") or {}
         if not isinstance(source, dict):
             continue
+        original_source = source
+        preferred = preferred_sources.get((school_key(source), str(record.get("sha256") or "")))
+        if preferred and extract_grades(str(source.get("candidate_name") or "")) != extract_grades(str(preferred.get("candidate_name") or "")):
+            source = preferred
         name = str(source.get("candidate_name") or "")
         evidence = str(record.get("evidence_text") or "")
         years = extract_years(name) or extract_years(evidence[:3000])
@@ -173,6 +204,9 @@ def main() -> None:
         semesters = [confirmed_semester] if confirmed_semester in (1, 2) else extract_semesters(name)
         curriculum, basis = resolve_curriculum(record, years, grades)
         enriched = dict(record)
+        if source is not original_source and source_key(source) != source_key(original_source):
+            enriched["source"] = source
+            enriched["duplicate_attachment_grade_reconciled_from"] = source_key(original_source)
         enriched.update({
             "resolved_curriculum": curriculum,
             "curriculum_resolution_basis": basis,
