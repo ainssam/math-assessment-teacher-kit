@@ -90,14 +90,22 @@ def element_text(element: etree._Element) -> str:
 
 
 def is_instruction_schedule(table: etree._Element) -> bool:
-    row = table.find(".//tr")
-    if row is None:
-        return False
-    cells = [compact(element_text(cell)) for cell in row.xpath("./th|./td")]
-    if {"수업방법", "진도계획"}.issubset(cells):
-        return True
-    return bool(len(cells) >= 5 and re.fullmatch(r"\d{1,2}월", cells[0])
-                and re.fullmatch(r"\d{1,2}\.\d{1,2}\.?[~∼～-]\d{1,2}\.\d{1,2}\.?", cells[1]))
+    for index, row in enumerate(table.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr")[:2]):
+        cells = [compact(element_text(cell)) for cell in row.xpath("./th|./td")]
+        if {"수업방법", "진도계획"}.issubset(cells):
+            return True
+        if len(cells) < 5:
+            continue
+        if index == 0 and re.fullmatch(r"\d{1,2}월", cells[0]) and re.fullmatch(
+            r"\d{1,2}\.\d{1,2}\.?[~∼～-]\d{1,2}\.\d{1,2}\.?", cells[1]
+        ):
+            return True
+        calendar = any(re.fullmatch(r"월(?:\(행사\))?|주|주차|시수[/·]누계|월/주|월주", cell) for cell in cells)
+        unit = any(re.search(r"^단원명|^단원\(|수업주제|^교수학습내용", cell) for cell in cells)
+        instruction = any(re.search(r"성취기준|평가요소|수업방법|교수학습", cell) for cell in cells)
+        if calendar and unit and instruction:
+            return True
+    return False
 
 
 @dataclass
@@ -314,8 +322,8 @@ def audit_html(value: str, *, is_rubric: bool = False) -> dict[str, object]:
         }
 
     tables = root.xpath(".//table")
-    if is_rubric and any(is_instruction_schedule(table) for table in tables):
-        flags.add("instruction_schedule_in_rubric")
+    if any(is_instruction_schedule(table) for table in tables):
+        flags.add("instruction_schedule_in_rubric" if is_rubric else "instruction_schedule_in_source")
     audits = [audit_table(table) for table in tables]
     visible = element_text(root)
     outside = outside_table_text(root)

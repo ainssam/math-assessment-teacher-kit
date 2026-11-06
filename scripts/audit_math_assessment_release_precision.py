@@ -230,7 +230,7 @@ def main() -> None:
         ORDER BY status.case_id
         """
     ):
-        expected = public_titles_by_case.get(str(row["case_id"]), [])
+        expected = list(dict.fromkeys(public_titles_by_case.get(str(row["case_id"]), [])))
         try:
             detected = json.loads(str(row["detected_titles_json"]))
         except json.JSONDecodeError:

@@ -2,6 +2,7 @@ import json
 import sqlite3
 
 import pytest
+from scripts.audit_math_assessment_table_structure import audit_html
 from scripts.build_math_assessment_detail_db import SCHEMA_SQL, build_details, detail_priority
 from scripts.build_math_assessment_publish_db import case_identifier
 from scripts.math_assessment_detail_parser import (
@@ -20,6 +21,20 @@ from scripts.repair_math_assessment_titles import (
     source_is_non_math_leak,
     strict_source_titles,
 )
+
+
+def test_audit_separates_teaching_calendar_from_assessment_scoring() -> None:
+    schedule = """<table><tbody><tr><th colspan="6">교수학습 계획</th></tr>
+      <tr><th>월 (행사)</th><th>주</th><th>단원명 (수업주제)</th>
+      <th>교육과정 성취기준</th><th>평가요소</th><th>평가방법</th></tr>
+      <tr><td>8</td><td>4주</td><td>함수의 극한</td><td>성취기준</td>
+      <td>극한의 뜻 설명</td><td>수행평가 연계</td></tr></tbody></table>"""
+    rubric = """<table><tr><th>평가영역</th><th>평가시기</th><th>성취기준</th>
+      <th>채점기준</th><th>배점</th></tr>
+      <tr><td>함수 탐구</td><td>9월 3주</td><td>함수</td><td>설명</td><td>20점</td></tr></table>"""
+    assert "instruction_schedule_in_source" in audit_html(schedule)["flags"]
+    assert "instruction_schedule_in_rubric" in audit_html(schedule, is_rubric=True)["flags"]
+    assert "instruction_schedule_in_rubric" not in audit_html(rubric, is_rubric=True)["flags"]
 
 
 def test_non_math_source_leak_is_detected_without_math_evidence() -> None:
