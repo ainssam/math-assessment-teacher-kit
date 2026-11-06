@@ -21,8 +21,9 @@ from extract_math_assessment_batch import extract
 ROOT = Path(__file__).resolve().parents[1]
 KORDOC = ROOT / "node_modules" / "kordoc" / "dist" / "cli.js"
 SEMESTER = re.compile(r"(?<!\d)([12])\s*학기")
-PLAN_HEADING = re.compile(r"평가\s*(?:계획|운영|안)|교수\s*[·ㆍ\-]?\s*학습")
+PLAN_HEADING = re.compile(r"평가\s*(?:계획|운영|안)|교수\s*[·ㆍ‧∙・\-]?\s*학습")
 ACADEMIC_YEAR = re.compile(r"\b(20\d{2})\s*학년도")
+ARCHIVE_MEMBER = re.compile(r"^\[zip:([^\r\n]+)\]\[(ok|short|failed)\]\n", re.M)
 
 
 def semester_status(name: str, text: str, semester: int, year: int) -> str:
@@ -50,6 +51,27 @@ def source_records(path: Path) -> list[dict]:
         return [json.loads(line) for line in stream if line.strip()]
 
 
+def confirmed_archive_members(name: str, text: str, semester: int, year: int) -> tuple[str, Counter]:
+    """Keep only verified semester members in the derived text of a bundle."""
+    markers = list(ARCHIVE_MEMBER.finditer(text))
+    selected = []
+    decisions = Counter()
+    for index, marker in enumerate(markers):
+        member_name, extraction = marker.groups()
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
+        if extraction != "ok":
+            decisions[extraction] += 1
+            continue
+        member_text = text[marker.end():end]
+        # Preserve contradictions with a declared archive term or year. A
+        # dated member can still establish the term when the bundle is generic.
+        status = semester_status(f"{name} {member_name}", member_text, semester, year)
+        decisions[status] += 1
+        if status == "confirmed":
+            selected.append(text[marker.start():end].rstrip("\n"))
+    return "\n\n".join(selected), decisions
+
+
 def jsonl(path: Path, rows) -> None:
     with path.open("x", encoding="utf-8", newline="\n") as stream:
         for row in rows:
@@ -61,7 +83,9 @@ def main() -> None:
     parser.add_argument("--year", type=int, default=2026)
     parser.add_argument("--semester", type=int, choices=(1, 2), default=2)
     parser.add_argument("--workers", type=int, choices=range(1, 9), default=4)
-    parser.add_argument("--snapshot", type=Path, help="bounded pilot collection directory")
+    inputs = parser.add_mutually_exclusive_group()
+    inputs.add_argument("--snapshot", type=Path, help="bounded pilot collection directory")
+    inputs.add_argument("--reconciled", type=Path, help="completed identity-audited collection directory")
     parser.add_argument("--warm-cache", action="store_true", help="extract completed receipts while collection runs")
     parser.add_argument("--revision", default="v1")
     parser.add_argument("--kordoc-cli", type=Path, default=KORDOC)
@@ -73,12 +97,12 @@ def main() -> None:
         parser.error("kordoc CLI not installed; run pnpm install or specify --kordoc-cli")
     round_no = 1 if args.semester == 1 else 3
     collection = ROOT / "data" / "derived" / "schoolinfo_4ga" / f"{args.year}-round-{round_no}"
-    snapshot = args.snapshot or collection
+    snapshot = args.snapshot or args.reconciled or collection
     converter_id = hashlib.sha256(kordoc.read_bytes()).hexdigest()[:12]
     cache = collection / f"extraction_cache_v2-{converter_id}"
     cache.mkdir(parents=True, exist_ok=True)
     if args.warm_cache:
-        if args.snapshot:
+        if args.snapshot or args.reconciled:
             parser.error("--warm-cache uses current collection receipts")
         latest = {}
         for receipt in sorted((collection / "school_receipts").glob("*.json")):
@@ -90,6 +114,8 @@ def main() -> None:
         summary = {}
     else:
         summary = json.loads((snapshot / "collection_summary.json").read_text(encoding="utf-8"))
+        if args.reconciled and summary.get("scope") != "reconciled_roster":
+            raise SystemExit("completed reconciled roster summary required")
         if not args.snapshot and summary["unattempted_schools"]:
             raise SystemExit("collection is still incomplete; use --warm-cache for incremental extraction")
         rows = source_records(snapshot / "attachments.jsonl")
@@ -139,12 +165,20 @@ def main() -> None:
     if args.warm_cache:
         return
 
-    label = f"{snapshot.name}-" if args.snapshot else ""
+    label = f"{snapshot.name}-" if args.snapshot or args.reconciled else ""
     output = collection / f"semester-{args.semester}-{label}{args.revision}"
     output.mkdir(exist_ok=False)
     statuses: Counter[str] = Counter()
     terms: Counter[str] = Counter()
+    archive_decisions: Counter[str] = Counter()
+    partial_archives = 0
     incomplete = {row["school_code"] for row in rows if row["result"] == "failed"}
+    if args.reconciled:
+        with (snapshot / "coverage_ledger.csv").open(encoding="utf-8-sig", newline="") as stream:
+            incomplete.update(
+                row["school_code"] for row in csv.DictReader(stream)
+                if row["collection_status"] != "listed"
+            )
     expected = 0
     manifest_fields = ["school_code", "school_name", "subject_canonical", "saved_path", "final_url"]
     with (
@@ -155,12 +189,24 @@ def main() -> None:
         writer.writeheader()
 
         def confirmed_records():
-            nonlocal expected
+            nonlocal expected, partial_archives
             for row in sources:
                 result = extract_record(row)
                 text, status = result["text"], result["extract_status"]
-                term = semester_status(row["candidate_name"], text if status == "ok" else "",
-                                       args.semester, args.year)
+                term = semester_status(row["candidate_name"], text if status == "ok" else "", args.semester, args.year)
+                selected = text if status == "ok" else ""
+                member_counts = Counter()
+                if Path(row["saved_path"]).suffix.lower() == ".zip":
+                    selected, member_counts = confirmed_archive_members(row["candidate_name"], text, args.semester, args.year)
+                    archive_decisions.update(member_counts)
+                    if member_counts:
+                        if selected:
+                            term = "confirmed"
+                        elif term == "confirmed":
+                            term = "no_confirmed_archive_members"
+                        if selected and member_counts.total() != member_counts["confirmed"]:
+                            partial_archives += 1
+                            incomplete.add(row["school_code"])
                 statuses[status] += 1
                 terms[term] += 1
                 if term not in {"confirmed", "other_semester"} or (term == "confirmed" and status != "ok"):
@@ -173,22 +219,29 @@ def main() -> None:
                 }
                 decisions.write(json.dumps({
                     **source, "extract_status": status, "char_count": len(text),
+                    **({"archive_member_decisions": dict(member_counts)} if member_counts else {}),
                 }, ensure_ascii=False) + "\n")
                 if term == "confirmed":
                     source["confirmed_semester"] = args.semester
                     writer.writerow(source)
                     expected += 1
                     yield {
-                        "source": source, "sha256": row["sha256"], "extract_status": status,
-                        "char_count": len(text), "text": text if status == "ok" else "",
+                        "source": source, "sha256": row["sha256"],
+                        "extract_status": "ok" if selected else status,
+                        "char_count": len(selected), "text": selected,
                     }
         jsonl(output / "confirmed_extractions.jsonl", confirmed_records())
     reconcile = {
         "year": args.year, "semester": args.semester, "disclosure_round": round_no,
-        "scope": "bounded_snapshot" if args.snapshot else "preserved_roster",
+        "scope": "bounded_snapshot" if args.snapshot else (
+            "reconciled_roster" if args.reconciled else "preserved_roster"
+        ),
         "collection": summary, "extraction_statuses": dict(statuses),
         "semester_decisions": dict(terms), "confirmed_sources": expected,
+        "archive_member_decisions": dict(archive_decisions), "partially_confirmed_archives": partial_archives,
     }
+    if args.reconciled:
+        reconcile["reconciled_roster"] = (snapshot / "roster.csv").resolve().relative_to(ROOT).as_posix()
     atomic_json(output / "reconciliation.json", reconcile)
     atomic_json(output / "incomplete_schools.json", sorted(incomplete))
     if not expected:
@@ -205,8 +258,10 @@ def main() -> None:
     coverage = output / "coverage.csv"
     coverage_summary = output / "coverage_summary.json"
     validation = output / "validation.json"
-    roster = collection / "roster.csv"
-    if args.snapshot:
+    roster = snapshot / "roster.csv" if args.reconciled else collection / "roster.csv"
+    if args.snapshot and (snapshot / "roster.csv").is_file():
+        roster = snapshot / "roster.csv"
+    elif args.snapshot:
         selected_codes = {row["school_code"] for row in rows}
         roster = output / "pilot_roster.csv"
         with (collection / "roster.csv").open(encoding="utf-8-sig", newline="") as inp:
