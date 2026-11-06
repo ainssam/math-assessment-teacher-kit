@@ -178,10 +178,10 @@ EXPECTED_STANDARD_PREFIXES = {
     "기본수학1": ("10기수1",),
     "기본수학2": ("10기수2",),
     "대수": ("12대수",),
-    "미적분Ⅰ": ("12미적Ⅰ",),
-    "미적분Ⅱ": ("12미적Ⅱ",),
-    "수학Ⅰ": ("12수학Ⅰ",),
-    "수학Ⅱ": ("12수학Ⅱ",),
+    "미적분Ⅰ": ("12미적Ⅰ", "12미적I"),
+    "미적분Ⅱ": ("12미적Ⅱ", "12미적II"),
+    "수학Ⅰ": ("12수학Ⅰ", "12수학I"),
+    "수학Ⅱ": ("12수학Ⅱ", "12수학II"),
     "미적분": ("12미적",),
     "확률과 통계": ("12확통",),
     "기하": ("12기하",),
@@ -266,24 +266,19 @@ def subject_code_key(value: str) -> str:
 def subjects_for_standard_codes(codes: list[str]) -> set[str]:
     """Map codes to subjects using only the most specific matching prefix."""
 
-    matched: set[str] = set()
-    normalized_prefixes = {
-        subject: tuple(subject_code_key(prefix) for prefix in prefixes)
-        for subject, prefixes in EXPECTED_STANDARD_PREFIXES.items()
-    }
-    for raw_code in codes:
-        code = subject_code_key(raw_code)
-        candidates = [
-            (len(prefix), subject)
-            for subject, prefixes in normalized_prefixes.items()
-            for prefix in prefixes
-            if code.startswith(prefix)
-        ]
-        if not candidates:
-            continue
-        longest = max(length for length, _ in candidates)
-        matched.update(subject for length, subject in candidates if length == longest)
-    return matched
+    return {subject for raw_code in codes for subject in _standard_code_subjects(subject_code_key(raw_code))}
+
+
+_NORMALIZED_STANDARD_PREFIXES = tuple(
+    (subject_code_key(prefix), subject)
+    for subject, prefixes in EXPECTED_STANDARD_PREFIXES.items() for prefix in prefixes
+)
+
+
+def _standard_code_subjects(code: str) -> set[str]:
+    matches = [(len(prefix), subject) for prefix, subject in _NORMALIZED_STANDARD_PREFIXES if code.startswith(prefix)]
+    longest = max((length for length, _ in matches), default=0)
+    return {subject for length, subject in matches if length == longest}
 
 
 def visible_text(value: str) -> str:
@@ -728,10 +723,7 @@ def segment_subject_alignment(segment: str, subject: str) -> str:
             shown,
         )
     ]
-    expected_prefixes = tuple(subject_code_key(prefix) for prefix in prefixes)
-    if codes and all(
-        any(code.startswith(prefix) for prefix in expected_prefixes) for code in codes
-    ):
+    if codes and all(_standard_code_subjects(code) == {subject} for code in codes):
         return "expected"
     # An explicit achievement-standard code is stronger boundary evidence than
     # a short subject-name mention.  If the code cannot confirm the requested
@@ -998,6 +990,10 @@ def _source_spelling_for_table_value(fragment: str, candidate: str) -> str:
 
 def _matched_rubric_html(block: str, title: str) -> str:
     title_key = compact_text(title)
+    criteria_labels = {
+        "채점기준", "평가기준", "평가척도", "점수부여기준", "세부평가기준",
+        "채점기준및배점", "평가관점및배점기준", "수행수준채점기준및배점", "수행평가채점기준",
+    }
     matched: list[str] = []
     for _, _, fragment in _table_fragments_with_spans(block):
         tables = _source_tables(fragment)
@@ -1006,21 +1002,16 @@ def _matched_rubric_html(block: str, title: str) -> str:
         rows = tables[0]
         for header_index, header in enumerate(rows[:-1]):
             labels = [compact_text(value) for value in header]
-            if not any(
-                marker in label
-                for label in labels
-                for marker in ("채점기준", "평가기준", "평가척도", "점수부여기준")
-            ):
+            if not criteria_labels.intersection(labels):
                 continue
             for source_row in rows[header_index + 1 :]:
-                row_keys = [compact_text(value) for value in source_row]
-                if not any(
-                    key == title_key
-                    or (len(title_key) >= 6 and title_key in key)
-                    or (len(key) >= 6 and key in title_key)
-                    for key in row_keys
-                    if key
-                ):
+                # A rubric row can label a task with its total in parentheses.
+                # Task names mentioned in teaching notes do not identify rows.
+                row_titles = {
+                    compact_text(re.sub(r"\s*\(\s*\d+(?:\.\d+)?\s*점\s*\)\s*$", "", visible_text(value)))
+                    for value in source_row
+                }
+                if not title_key or title_key not in row_titles:
                     continue
                 rendered = _row_table_html(header, source_row)
                 if rendered not in matched:
@@ -1186,11 +1177,11 @@ def _matrix_table_items(
                 continue
             first = compact_text(row[0])
             row_labels = [compact_text(cell) for cell in row]
-            if first in {"평가종류", "평가구분", "구분"} and any(
+            if first in {"평가종류", "평가구분", "평가유형", "구분"} and any(
                 "수행평가" in label for label in row_labels[1:]
             ):
                 category_row = row
-            if first in {"평가영역", "평가영역명", "평가내용", "수행평가명", "과제명"}:
+            if first in {"평가영역", "평가영역명", "평가내용", "수행평가명", "과제명", "횟수영역"}:
                 title_row = row
         if category_row is None or title_row is None:
             continue
@@ -1226,6 +1217,15 @@ def _matrix_table_items(
                 continue
             title = _source_spelling_for_table_value(fragment, candidate)
             fields = _exact_fields(matrix_html)
+            # A matrix can show the total weight of all performance tasks above
+            # the separate weight in each task's own score cell.
+            own_weight = next(
+                (_first_pattern([value], WEIGHT_VALUE_RE) for label, value in pairs
+                 if "만점" in compact_text(label) and "반영비율" in compact_text(label)),
+                "",
+            )
+            if own_weight:
+                fields["weight"] = own_weight
             rubric_html = _matched_rubric_html(value, title)
             source_html = (
                 matrix_html
@@ -1969,13 +1969,13 @@ def _rubric_html(segment: str) -> str:
     tables: list[str] = []
     for match in re.finditer(r"<table\b.*?</table>", segment, flags=re.I | re.S):
         shown = visible_text(match.group(0))
-        if re.search(r"채점\s*기준|세부\s*기준|평가\s*요소", shown) and re.search(
+        if re.search(r"채점\s*기준|세부\s*기준|평가\s*요소|평가\s*관점\s*및\s*배점\s*기준", shown) and re.search(
             r"점수|배점|부여\s*점수", shown
         ):
             tables.append(sanitize_table_html(match.group(0)))
     for fragment in _markdown_pipe_table_fragments(segment):
         shown = visible_text(fragment)
-        if re.search(r"채점\s*기준|세부\s*기준|평가\s*요소", shown) and re.search(
+        if re.search(r"채점\s*기준|세부\s*기준|평가\s*요소|평가\s*관점\s*및\s*배점\s*기준", shown) and re.search(
             r"점수|배점|부여\s*점수|척도", shown
         ):
             tables.append(markdown_fragment_to_html(fragment))

@@ -5,6 +5,7 @@ import pytest
 from scripts.build_math_assessment_detail_db import SCHEMA_SQL, build_details, detail_priority
 from scripts.build_math_assessment_publish_db import case_identifier
 from scripts.math_assessment_detail_parser import (
+    _matched_rubric_html,
     balance_table_tags,
     heading_title_is_structural,
     markdown_fragment_to_html,
@@ -57,6 +58,51 @@ def test_subject_code_alignment_accepts_grade_course_separator_variant() -> None
 
     assert segment_subject_alignment(source, "대수") == "expected"
     assert segment_subject_alignment(source, "기하") == "other"
+
+
+def test_pdf_latin_roman_numerals_keep_calculus_courses_distinct() -> None:
+    assert segment_subject_alignment("[12미적I-01-01] 극한", "미적분Ⅰ") == "expected"
+    assert segment_subject_alignment("[12미적II-01-01] 극한", "미적분Ⅱ") == "expected"
+    assert segment_subject_alignment("[12미적II-01-01] 극한", "미적분Ⅰ") == "other"
+
+
+def test_rubric_matching_requires_a_criteria_header_and_exact_task_cell() -> None:
+    source = """
+<table>
+<tr><td>3월</td><td>오리엔테이션, 평가 기준 및 수업 규칙</td></tr>
+<tr><td>4월</td><td>수행평가 독서를 통한 수학의 이해 주제 선정</td></tr>
+</table>
+<table>
+<tr><th>평가 항목</th><th>평가 관점 및 배점 기준</th><th>배점</th></tr>
+<tr><td>독서를 통한 수학의 이해 (20점)</td><td>탐구 주제가 분명함</td><td>20</td></tr>
+<tr><td>다른 과제</td><td>독서를 통한 수학의 이해 활동 참조</td><td>5</td></tr>
+</table>
+"""
+    rubric = _matched_rubric_html(source, "독서를 통한 수학의 이해")
+    assert "탐구 주제가 분명함" in rubric
+    assert "오리엔테이션" not in rubric
+    assert "다른 과제" not in rubric
+
+
+def test_assessment_type_matrix_uses_the_tasks_own_weight_and_schedule() -> None:
+    source = """
+# 미적분Ⅰ
+## 수행평가 계획
+<table>
+<tr><th>평가 유형</th><th>정기시험</th><th colspan="2">수행평가</th></tr>
+<tr><th>반영비율</th><td>50%</td><td colspan="2">50%</td></tr>
+<tr><th>횟수/영역</th><td>1회</td><td>수학 독서 보고서</td><td>미분 활용 탐구</td></tr>
+<tr><th>평가 방법</th><td>선택형</td><td>프로젝트</td><td>프로젝트</td></tr>
+<tr><th>영역만점(반영비율)</th><td>80점 (50%)</td><td>100점 (30%)</td><td>100점 (20%)</td></tr>
+<tr><th>평가 시기</th><td>4월</td><td>3월</td><td>6월</td></tr>
+<tr><th>성취기준</th><td>[12미적I-01-01]</td><td>[12미적I-01-01]</td><td>[12미적I-02-01]</td></tr>
+</table>
+"""
+    section = parse_assessment_section(source, "미적분Ⅰ", ("수학 독서 보고서", "미분 활용 탐구"))
+    assert [(item.title, item.method, item.score, item.weight, item.timing) for item in section.items] == [
+        ("수학 독서 보고서", "프로젝트", "100점", "30%", "3월"),
+        ("미분 활용 탐구", "프로젝트", "100점", "20%", "6월"),
+    ]
 
 
 def test_combined_plan_uses_exact_short_course_heading_boundary() -> None:
