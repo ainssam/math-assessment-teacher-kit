@@ -6,6 +6,8 @@
 
 Node.js 24 이상, pnpm 11, Python 3.12 이상이 필요합니다. 아래 예시는 Windows PowerShell 기준입니다. GitHub에서 **Code → Download ZIP**으로 받은 경우에는 압축을 풀고 그 폴더에서 `pnpm install`부터 실행하면 됩니다.
 
+Windows에서 프로젝트를 외장 드라이브에 둘 때는 NTFS를 사용하세요. exFAT에서는 pnpm의 의존성 링크 설치가 실패할 수 있습니다.
+
 ```powershell
 git clone https://github.com/ainssam/math-assessment-teacher-kit.git
 cd math-assessment-teacher-kit
