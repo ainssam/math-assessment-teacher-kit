@@ -30,13 +30,19 @@ def rejected(title: str, basis: str) -> bool:
     return confidence(audit_flags(str(title).strip(), str(basis)), str(basis)) == "reject"
 
 
-def quarantine(connection: sqlite3.Connection) -> dict[str, int]:
+def quarantine(connection: sqlite3.Connection, review_item_ids: set[str] | None = None) -> dict[str, int]:
     counts: Counter[str] = Counter()
+    pending_review = set(review_item_ids or ())
+    review_cases: set[str] = set()
     for row in connection.execute(
-        "SELECT item_id, title, title_basis, extraction_status FROM assessment_items"
+        "SELECT item_id, title, title_basis, extraction_status, case_id FROM assessment_items"
     ).fetchall():
-        item_id, title, basis, extraction_status = map(str, row)
-        if not rejected(title, basis):
+        item_id, title, basis, extraction_status, case_id = map(str, row)
+        needs_review = item_id in pending_review
+        pending_review.discard(item_id)
+        if needs_review:
+            review_cases.add(case_id)
+        if not rejected(title, basis) and not needs_review:
             continue
         next_status = (
             "source_mismatch_review"
@@ -53,7 +59,10 @@ def quarantine(connection: sqlite3.Connection) -> dict[str, int]:
             """,
             (SYNTHETIC_TITLE, SYNTHETIC_TITLE, next_status, item_id),
         )
-        counts["items_quarantined"] += 1
+        counts["review_items_quarantined" if needs_review else "items_quarantined"] += 1
+
+    if pending_review:
+        raise ValueError(f"review list contains {len(pending_review)} unknown item IDs")
 
     implausible_cases = [
         str(row[0])
@@ -100,6 +109,11 @@ def quarantine(connection: sqlite3.Connection) -> dict[str, int]:
                 continue
             if title not in kept:
                 kept.append(title)
+        if case_id in review_cases:
+            kept = list(dict.fromkeys(row[0] for row in connection.execute(
+                """SELECT title FROM assessment_items WHERE case_id=? AND extraction_status='bounded'
+                   AND title_basis IN ('table', 'heading') ORDER BY item_order""", (case_id,),
+            )))
         items = connection.execute(
             "SELECT extraction_status FROM assessment_items WHERE case_id = ? ORDER BY item_order",
             (case_id,),
@@ -139,7 +153,14 @@ def main() -> None:
         type=Path,
         default=root / "data" / "derived" / "math_assessment_title_quarantine_manifest.json",
     )
+    parser.add_argument("--review-items", type=Path, help="JSON list of item IDs from source-boundary or rendering audits")
     args = parser.parse_args()
+    review_item_ids = None
+    if args.review_items:
+        entries = json.loads(args.review_items.read_text(encoding="utf-8"))
+        if not isinstance(entries, list) or any(not isinstance(value, str) for value in entries):
+            parser.error("review items must be a JSON list of IDs")
+        review_item_ids = set(entries)
     database = args.database.resolve()
     descriptor, name = tempfile.mkstemp(
         prefix=database.stem + "_title_quarantine_", suffix=".partial", dir=database.parent
@@ -151,7 +172,7 @@ def main() -> None:
     try:
         with sqlite3.connect(temporary) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
-            counts = quarantine(connection)
+            counts = quarantine(connection, review_item_ids)
             connection.commit()
             if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise SystemExit("quarantined database failed integrity_check")

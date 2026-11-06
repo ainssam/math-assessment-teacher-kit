@@ -148,7 +148,10 @@ function renderedTableTopologyIssues(value) {
   return issues;
 }
 
+const reviewItemIds = new Set();
+
 function sample(list, value, limit = 30) {
+  reviewItemIds.add(value.item_id);
   if (list.length < limit) list.push(value);
 }
 
@@ -305,6 +308,7 @@ try {
   }
 
   report.elapsed_seconds = Number(((performance.now() - startedAt) / 1000).toFixed(2));
+  report.review_item_ids = [...reviewItemIds].sort();
   report.passed = (
     report.decode_failure_count === 0
     && report.render_failure_count === 0

@@ -1470,6 +1470,24 @@ def file_record(path: Path, root: Path) -> dict[str, object]:
     }
 
 
+def load_reusable_cases(paths: list[Path], target: sqlite3.Connection) -> dict[str, tuple]:
+    """Read previously built case rows without re-extracting their assessment summaries."""
+    columns = [row[1] for row in target.execute("PRAGMA table_info(cases)")]
+    projection = ", ".join(f'"{column}"' for column in columns)
+    cases = {}
+    for path in paths:
+        uri = path.resolve().as_uri() + "?mode=ro&immutable=1"
+        with sqlite3.connect(uri, uri=True) as source:
+            if {row[1] for row in source.execute("PRAGMA table_info(cases)")} != set(columns):
+                raise SystemExit(f"case schema differs in reusable database: {path}")
+            for row in source.execute(f"SELECT {projection} FROM cases"):
+                if row[0] in cases:
+                    raise SystemExit(f"duplicate case ID in reusable databases: {row[0]}")
+                cases[row[0]] = row
+        source.close()
+    return cases
+
+
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     derived = root / "data" / "derived"
@@ -1516,6 +1534,8 @@ def main() -> None:
         default=publish / "math_assessment_publish_manifest.json",
     )
     parser.add_argument("--replace", action="store_true")
+    parser.add_argument("--reuse-case-db", type=Path, action="append", default=[],
+                        help="use audited case rows instead of rebuilding summaries")
     args = parser.parse_args()
 
     inputs = [
@@ -1525,6 +1545,7 @@ def main() -> None:
         args.validation,
         args.completion,
         args.schools,
+        *args.reuse_case_db,
     ]
     missing = [str(path) for path in inputs if not path.is_file()]
     if missing:
@@ -1553,6 +1574,7 @@ def main() -> None:
         connection.execute("PRAGMA synchronous = OFF")
         connection.executescript(SCHEMA_SQL)
         subject_count = insert_subjects(connection, trends, coverage)
+        reusable = load_reusable_cases(args.reuse_case_db, connection) if args.reuse_case_db else None
         metadata = {
             "schema_version": SCHEMA_VERSION,
             "source_catalog_rows": expected_rows,
@@ -1572,7 +1594,15 @@ def main() -> None:
             ],
         )
         for row in read_jsonl(args.catalog):
-            values = case_values(row, school_districts)
+            if reusable is None:
+                values = case_values(row, school_districts)
+            else:
+                case_id = case_identifier(str(row.get("sha256") or "").strip(),
+                                          str(row.get("resolved_curriculum") or "shared"),
+                                          str(row.get("subject") or "").strip())
+                if case_id not in reusable:
+                    raise SystemExit(f"catalog case missing from reusable databases: {case_id}")
+                values = reusable.pop(case_id)
             connection.execute(CASE_INSERT_SQL, values)
             case_id = str(values[0])
             for tag in json.loads(str(values[17])):
@@ -1583,6 +1613,8 @@ def main() -> None:
                     (case_id, position, task_name),
                 )
             case_count += 1
+        if reusable:
+            raise SystemExit(f"reusable databases include {len(reusable)} cases outside the catalog")
         if case_count != expected_rows:
             raise SystemExit(f"case count mismatch: expected={expected_rows}, actual={case_count}")
         connection.execute(
