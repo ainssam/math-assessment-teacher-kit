@@ -5,6 +5,7 @@ import pytest
 from scripts.build_math_assessment_detail_db import SCHEMA_SQL, build_details, detail_priority
 from scripts.build_math_assessment_publish_db import case_identifier
 from scripts.math_assessment_detail_parser import (
+    _hinted_table_items,
     _matched_rubric_html,
     balance_table_tags,
     heading_title_is_structural,
@@ -103,6 +104,16 @@ def test_assessment_type_matrix_uses_the_tasks_own_weight_and_schedule() -> None
         ("수학 독서 보고서", "프로젝트", "100점", "30%", "3월"),
         ("미분 활용 탐구", "프로젝트", "100점", "20%", "6월"),
     ]
+
+
+def test_a_task_mention_in_a_teaching_schedule_cannot_supply_a_card() -> None:
+    schedule = """
+<table>
+<tr><th>단원명</th><th>성취기준</th><th>수업 방법</th><th>평가방법</th><th>진도 계획</th></tr>
+<tr><td>함수</td><td>[12대수01-01]</td><td>토론</td><td>자료 분석 프로젝트</td><td>5월</td></tr>
+</table>
+"""
+    assert _hinted_table_items(schedule, "대수", "subject_heading", 0, ("자료 분석 프로젝트",)) == []
 
 
 def test_combined_plan_uses_exact_short_course_heading_boundary() -> None:

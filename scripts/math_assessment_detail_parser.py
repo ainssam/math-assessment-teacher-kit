@@ -1021,6 +1021,12 @@ def _matched_rubric_html(block: str, title: str) -> str:
     return "\n".join(matched)
 
 
+def _instruction_schedule_rows(rows: list[list[str]]) -> bool:
+    if not rows:
+        return False
+    return {"수업방법", "진도계획"}.issubset(compact_text(cell) for cell in rows[0])
+
+
 def _expected_code_table_items(full_text: str, subject: str) -> list[ParsedAssessmentItem]:
     """Recover explicit task tables when a combined document lost its headings.
 
@@ -1281,9 +1287,14 @@ def _hinted_table_items(
     seen: set[str] = set()
     for start, end, fragment in _table_fragments_with_spans(value):
         tables = _source_tables(fragment)
-        if not tables:
+        if not tables or _instruction_schedule_rows(tables[0]):
             continue
         cells = [cell for row in tables[0] for cell in row]
+        # A matrix shared with written exams needs a task-specific column.
+        # A matching title in the table alone cannot identify its scores or dates.
+        category_labels = ({re.sub(r"\d+$", "", compact_text(cell)) for cell in row} for row in tables[0])
+        if any("수행평가" in labels and {"정기시험", "지필평가"}.intersection(labels) for labels in category_labels):
+            continue
         compact_cells = [compact_text(cell) for cell in cells]
         compact_fragment = compact_text(visible_text(fragment))
         evidence_markers = sum(
@@ -1601,6 +1612,7 @@ METHOD_TERMS = (
 METHOD_SUBLABELS = {
     "유형", "평가유형", "과제유형", "주체", "평가주체", "방식", "평가방식",
     "수행방식", "점수부여", "점수부여방법", "평가방법", "방법",
+    "진도계획", "수업방법", "수업평가연계의주안점", "정기시험", "지필평가",
 }
 METHOD_SEPARATOR_RE = r"[·ㆍ･・‧]"
 METHOD_TERM_RE = (
@@ -1715,6 +1727,8 @@ def _exact_fields(segment: str) -> dict[str, object]:
     found: dict[str, list[str]] = {key: [] for key in FIELD_LABELS}
     tables = _source_tables(segment)
     for rows in tables:
+        if _instruction_schedule_rows(rows):
+            continue
         collapsed_rows = [_collapse_adjacent_cells(row) for row in rows]
         for row_index, values in enumerate(collapsed_rows):
             keys = [compact_text(value) for value in values]
