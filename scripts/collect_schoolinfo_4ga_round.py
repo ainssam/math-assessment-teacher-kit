@@ -149,9 +149,14 @@ def collect_school(
         expected = {"SHL_IDF_CD": uid, "JG_YEAR": str(year), "JG_CHASU": str(round_no)}
         if any(download_params.get(key) != value for key, value in expected.items()):
             return {**record, "status": "round_unconfirmed", "detail": "download_form_scope_mismatch"}
-        if len({attachment.file_seq for attachment in attachments}) != len(attachments):
-            return {**record, "status": stage, "detail": "duplicate_file_sequences"}
+        by_sequence = {}
         for attachment in attachments:
+            previous = by_sequence.setdefault(attachment.file_seq, attachment)
+            if previous.filename != attachment.filename:
+                return {**record, "status": stage, "detail": "conflicting_file_sequences"}
+        if len(by_sequence) != len(attachments):
+            record["duplicate_file_links"] = len(attachments) - len(by_sequence)
+        for attachment in by_sequence.values():
             filename = attachment.filename
             final_url = f"{BASE_URL}/servlets/EiFileDownLoad.do?{urlencode(download_params | {'FILE_SEQ': attachment.file_seq})}"
             row = {
