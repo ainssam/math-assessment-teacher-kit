@@ -75,3 +75,13 @@ $candidate = "$revision/detail_candidate.sqlite"
 ```
 
 상세 DB를 외부에 제공하기 전에는 제목·과목·공개 게이트와 렌더러 감사를 실시합니다. 원문은 학교알리미 링크로 안내하고, 공개할 발췌나 표는 별도로 검토합니다. [공개 기준](SOURCE_POLICY.md)
+
+## 스캔 PDF를 다시 읽는 경우
+
+글자층이 없는 PDF는 한글·영어 언어 데이터(`kor`, `eng`)를 설치한 로컬 Tesseract로 페이지별 텍스트를 만들 수 있습니다. 아래 명령의 Tesseract 경로와 리비전 이름을 환경에 맞게 바꾸세요. `--math-names`는 파일명에 수학 과목이 잡힌 자료를 우선하고, `--page-limit 1`은 표지 점검부터 시작할 때 사용합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/extract_schoolinfo_scanned_pdf_pages.py --decisions "$revision/source_decisions.jsonl" --tesseract 'C:/Program Files/Tesseract-OCR/tesseract.exe' --output "$revision/ocr-cover-v1" --math-names --page-limit 1
+```
+
+결과에는 원문 SHA-256, 페이지 번호, OCR 텍스트와 실패 여부가 들어 있습니다. 표에서 행과 열이 뒤섞일 수 있으므로 과제명, 평가 시기, 배점, 채점기준을 원본 페이지에서 확인한 뒤 사례 데이터에 사용하세요.

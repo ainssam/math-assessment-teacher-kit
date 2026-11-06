@@ -1024,7 +1024,8 @@ def _matched_rubric_html(block: str, title: str) -> str:
 def _instruction_schedule_rows(rows: list[list[str]]) -> bool:
     if not rows:
         return False
-    return {"수업방법", "진도계획"}.issubset(compact_text(cell) for cell in rows[0])
+    labels = {compact_text(cell) for cell in rows[0]}
+    return "수업방법" in labels and bool({"진도계획", "수업평가연계의주안점"}.intersection(labels))
 
 
 def _expected_code_table_items(full_text: str, subject: str) -> list[ParsedAssessmentItem]:
@@ -1573,6 +1574,7 @@ def _valid_plan_title(value: str) -> bool:
             "평가시기",
             "평가요소방법",
             "정기시험",
+            "학습내용",
         }
         or re.search(r"(?:평가|반영)\s*비율|\d+\s*(?:점|%)$", value)
         or re.fullmatch(

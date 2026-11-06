@@ -6,6 +6,16 @@ from scripts.build_math_assessment_publish_db import (
     plain_text,
     task_name_is_rejected,
 )
+from scripts.build_math_assessment_manifest import classify
+from scripts.math_subject_aliases import subject_hits
+
+
+def test_latin_roman_numerals_are_separate_in_filenames_and_headings() -> None:
+    assert classify("2026학년도 2학기 미적분I과목.pdf")[1] == "미적분Ⅰ"
+    assert classify("2026학년도 2학기 미적분II과목.pdf")[1] == "미적분Ⅱ"
+    assert {hit["subject"] for hit in subject_hits("과목명: [미적분 I]")} == {"미적분Ⅰ"}
+    assert {hit["subject"] for hit in subject_hits("과목명: [미적분 II]")} == {"미적분Ⅱ"}
+    assert {hit["subject"] for hit in subject_hits("과목명: [공통 수학 II]")} == {"공통수학2"}
 
 
 def test_plain_text_preserves_html_table_cells() -> None:
