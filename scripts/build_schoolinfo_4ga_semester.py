@@ -128,8 +128,12 @@ def main() -> None:
         row for (sha, suffix), row in unique.items()
         if not (cache / f"{sha}{suffix}.json").is_file()
     ]
+
+    def populate_cache(row: dict) -> None:
+        extract_record(row)
+
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        for index, _ in enumerate(pool.map(extract_record, pending), 1):
+        for index, _ in enumerate(pool.map(populate_cache, pending), 1):
             if index % 50 == 0 or index == len(pending):
                 print(f"extraction_cache={index}/{len(pending)}", flush=True)
     if args.warm_cache:
@@ -191,7 +195,7 @@ def main() -> None:
         raise SystemExit("no source confirmed for this semester")
 
     def run(script: str, *arguments: object) -> None:
-        subprocess.run([sys.executable, str(ROOT / "scripts" / script), *map(str, arguments)],
+        subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "scripts" / script), *map(str, arguments)],
                        cwd=ROOT, check=True)
 
     source = output / "evidence_source.jsonl"
