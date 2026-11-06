@@ -89,6 +89,17 @@ def element_text(element: etree._Element) -> str:
     return " ".join(part.strip() for part in element.itertext() if part.strip())
 
 
+def is_instruction_schedule(table: etree._Element) -> bool:
+    row = table.find(".//tr")
+    if row is None:
+        return False
+    cells = [compact(element_text(cell)) for cell in row.xpath("./th|./td")]
+    if {"수업방법", "진도계획"}.issubset(cells):
+        return True
+    return bool(len(cells) >= 5 and re.fullmatch(r"\d{1,2}월", cells[0])
+                and re.fullmatch(r"\d{1,2}\.\d{1,2}\.?[~∼～-]\d{1,2}\.\d{1,2}\.?", cells[1]))
+
+
 @dataclass
 class TableAudit:
     row_count: int
@@ -290,7 +301,7 @@ def count_section_local_blank_column_tables(root: etree._Element) -> int:
     return count
 
 
-def audit_html(value: str) -> dict[str, object]:
+def audit_html(value: str, *, is_rubric: bool = False) -> dict[str, object]:
     flags: set[str] = set()
     try:
         root = parse_fragment(value)
@@ -303,6 +314,8 @@ def audit_html(value: str) -> dict[str, object]:
         }
 
     tables = root.xpath(".//table")
+    if is_rubric and any(is_instruction_schedule(table) for table in tables):
+        flags.add("instruction_schedule_in_rubric")
     audits = [audit_table(table) for table in tables]
     visible = element_text(root)
     outside = outside_table_text(root)
@@ -463,7 +476,7 @@ def main() -> None:
                 value = restore_escaped_table_rows(
                     zlib.decompress(bytes(row[blob_name])).decode("utf-8")
                 )
-                result = audit_html(value)
+                result = audit_html(value, is_rubric=part_name == "rubric")
             except (zlib.error, UnicodeDecodeError):
                 result = {
                     "flags": ["html_decode_failed"],

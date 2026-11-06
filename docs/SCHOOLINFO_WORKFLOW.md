@@ -64,4 +64,14 @@ ZIP에 여러 문서가 있으면 안쪽 문서별로 학년도와 학기를 확
 
 평가명이 원문 표나 제목에서 확인되는지, 한 항목의 배점과 채점기준이 같은 과제에 속하는지, 과목·학기가 맞는지 대조합니다. 학기 표지가 없거나 서로 다르면 검토 대상으로 남깁니다. 수집 및 추출 무결성 검사와 공개 항목의 정확성 검사는 별개입니다.
 
+진도표에 수행평가 이름이 등장해도 그 행은 수업 일정일 수 있습니다. 표 구조 감사에서 `rubric:instruction_schedule_in_rubric`이 나오면 원문의 수행평가 세부 기준으로 돌아가 제목과 배점을 함께 확인하세요. `3월, 5월`이나 `5월 4주(1회)`처럼 원문에 시기가 여러 번 적힌 경우에는 그 표기를 보존할 수 있습니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install lxml
+$revision = 'data/derived/schoolinfo_4ga/2026-round-3/semester-2-v1'
+$candidate = "$revision/detail_candidate.sqlite"
+.\.venv\Scripts\python.exe -X utf8 scripts/audit_math_assessment_release_precision.py --database $candidate --output "$revision/precision.json" --queue "$revision/precision_review.csv"
+.\.venv\Scripts\python.exe -X utf8 scripts/audit_math_assessment_table_structure.py --database $candidate --output "$revision/tables.json" --queue "$revision/tables_review.csv"
+```
+
 상세 DB를 외부에 제공하기 전에는 제목·과목·공개 게이트와 렌더러 감사를 실시합니다. 원문은 학교알리미 링크로 안내하고, 공개할 발췌나 표는 별도로 검토합니다. [공개 기준](SOURCE_POLICY.md)
