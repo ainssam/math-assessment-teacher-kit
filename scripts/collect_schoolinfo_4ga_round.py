@@ -39,6 +39,7 @@ ITEM_PATH = "/ei/pp/Pneipp_b43_s0p.do"
 DOWNLOAD_FORM = re.compile(r'<form\b[^>]*\bid="eiFileDownForm"[^>]*>(.*?)</form>', re.I | re.S)
 ROUND_SELECTOR = re.compile(r'<select\b[^>]*\bid="select_trans_dt"[^>]*>(.*?)</select>', re.I | re.S)
 ROUND_OPTION = re.compile(r'<option\b[^>]*\bvalue="(\d+)"[^>]*\bselected\b[^>]*>', re.I)
+ANY_ROUND_OPTION = re.compile(r'<option\b[^>]*\bvalue="(\d+)"', re.I)
 NON_PLAN = re.compile(r"학업\s*성적\s*관리\s*(?:규정|위원회)|협의록|회의록")
 PLAN = re.compile(r"평가\s*(?:계획|운영|안)|교수\s*[·ㆍ\-]?\s*학습")
 TERM = re.compile(r"([12])\s*학기")
@@ -73,7 +74,7 @@ def read_roster(path: Path) -> list[School]:
 
 def collect_school(
     school: School, project: Path, raw: Path, year: int, round_no: int,
-    pause: float, stop: threading.Event,
+    pause: float, stop: threading.Event, verified_identity: tuple[str, str] | None = None,
 ) -> dict:
     identity = {
         "school_id": school.school_id, "school_code": school.school_code, "school_name": school.school_name,
@@ -88,19 +89,27 @@ def collect_school(
         if stop.wait(pause):
             return {**record, "status": "stopped"}
         browser = opener()
-        uid, error = resolve_shl_idf(browser, school)
+        uid, error = (verified_identity[0], "") if verified_identity else resolve_shl_idf(
+            browser, school, require_region_match=True
+        )
         if not uid:
             if re.search(r"HTTP Error (403|429|503)\b", error):
                 stop.set()
             return {**record, "status": stage, "detail": error}
         stage = "page_failed"
+        record["identity_basis"] = verified_identity[1] if verified_identity else "name_and_region_lookup"
         source_url = f"{BASE_URL}{ITEM_PATH}?{urlencode({'SHL_IDF_CD': uid, 'JG_YEAR': year, 'JG_CHASU': round_no})}"
         record["source_url"] = source_url
         meta = post(browser, HANGMOK_URL, {"SHL_IDF_CD": uid}, 15)
+        payload = json.loads(meta.body)
+        if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):
+            return {**record, "status": stage, "detail": "item_list_response_changed"}
         items = [
-            item for item in json.loads(meta.body)
+            item for item in payload
             if isinstance(item, dict) and item.get("GS_HANGMOK_NO") == "4-가"
         ]
+        if payload and not items:
+            return {**record, "status": "disclosure_item_not_listed"}
         if len(items) != 1 or items[0].get("GS_URL") != ITEM_PATH:
             return {**record, "status": stage, "detail": "4ga_item_missing_or_changed"}
         params = params_from_item(items[0], str(year), uid) | {"JG_CHASU": str(round_no)}
@@ -109,6 +118,11 @@ def collect_school(
         select = ROUND_SELECTOR.search(page.body)
         options = ROUND_OPTION.findall(select[1]) if select else []
         if options != [f"{year}{round_no}"]:
+            available = ANY_ROUND_OPTION.findall(select[1]) if select else []
+            if available and f"{year}{round_no}" not in available:
+                return {**record, "status": "disclosure_round_not_listed", "available_rounds": available}
+            if "4-가." in page.body and re.search(r"입력된\s*데이터가\s*없습니다", page.body):
+                return {**record, "status": "no_data_response_for_request"}
             classification = classify_response_html(int(page.status_code), page.body)
             if classification.result_status == "blocked":
                 stop.set()
@@ -216,16 +230,57 @@ def main() -> None:
     parser.add_argument("--workers", type=int, choices=(1, 2, 3), default=2)
     parser.add_argument("--pause", type=float, default=0.25)
     parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--scope", default="", help="separate scope for a verified supplementary roster")
+    parser.add_argument("--official-directory", type=Path, help="verify and use Schoolinfo IDs supplied in the roster")
+    parser.add_argument("--identity-crosswalk", type=Path,
+                        help="verified Schoolinfo IDs for schools present in an existing roster")
     args = parser.parse_args()
     if not 2024 <= args.year <= 2099 or args.limit < 0 or args.pause < 0.2:
         parser.error("invalid year, limit or pause (minimum 0.2 seconds)")
+    if args.scope and not re.fullmatch(r"[a-zA-Z0-9-]+", args.scope):
+        parser.error("invalid scope name")
+    if args.identity_crosswalk and not args.official_directory:
+        parser.error("--identity-crosswalk requires --official-directory")
     project = Path(__file__).resolve().parents[1]
-    key = f"{args.year}-round-{args.round}"
+    key = f"{args.year}-round-{args.round}" + (f"-{args.scope}" if args.scope else "")
     raw = project / "data" / "raw" / "schoolinfo" / "4ga_rounds" / key
     derived = project / "data" / "derived" / "schoolinfo_4ga" / key
     receipts = derived / "school_receipts"
     receipts.mkdir(parents=True, exist_ok=True)
     schools = read_roster(args.roster)
+    verified_ids = {}
+    if args.official_directory:
+        with args.official_directory.open(encoding="utf-8-sig", newline="") as source:
+            official = {row["SHL_IDF_CD"]: row for row in csv.DictReader(source)}
+        school_by_id = {school.school_id: school for school in schools}
+        with (args.identity_crosswalk or args.roster).open(encoding="utf-8-sig", newline="") as source:
+            for row in csv.DictReader(source):
+                school = school_by_id.get(row["school_id"])
+                if args.identity_crosswalk and school is None:
+                    continue
+                uid = row.get("schoolinfo_uuid", "")
+                match = official.get(uid)
+                if (not school or (school.school_name, school.region_sido, school.school_code) != (
+                    row["school_name"], row["region_sido"], row["school_code"]
+                ) or not match or (match["SHL_NM"], match["SHL_CD"]) != (row["school_name"], row.get("schoolinfo_code"))):
+                    parser.error(f"official directory identity not verified for {row['school_id']}")
+                if school.school_id in verified_ids:
+                    parser.error(f"duplicate verified identity for {school.school_id}")
+                basis = "official_directory_uuid"
+                if match.get("profile_url"):
+                    expected_url = f"{BASE_URL}/ei/ss/Pneiss_b01_s0.do?SHL_IDF_CD={uid}"
+                    profile = (project / match["saved_path"]).resolve()
+                    if match["profile_url"] != expected_url or not profile.is_relative_to(project / "data" / "raw" / "schoolinfo"):
+                        parser.error(f"invalid school profile evidence for {row['school_id']}")
+                    body = profile.read_bytes()
+                    title = f'<title>{row["school_name"]} 학교정보 | 학교알리미</title>'
+                    if hashlib.sha256(body).hexdigest() != match["sha256"] or title not in body.decode("utf-8"):
+                        parser.error(f"school profile hash or identity mismatch for {row['school_id']}")
+                    basis = "official_school_profile_uuid"
+                verified_ids[row["school_id"]] = (uid, basis)
+        if (len({item[0] for item in verified_ids.values()}) != len(verified_ids)
+                or (not args.identity_crosswalk and len(verified_ids) != len(schools))):
+            parser.error("official school identities must be unique")
     stop = threading.Event()
     with sqlite3.connect(derived / "collector_lock.sqlite", timeout=0) as lock:
         lock.execute("BEGIN IMMEDIATE")
@@ -236,13 +291,17 @@ def main() -> None:
         if not snapshot.exists():
             atomic_bytes(snapshot, roster_bytes)
         latest = {}
-        attempts = {}
-        for school in schools:
-            code = school.school_id
-            previous = sorted(receipts.glob(f"{code}-*.json"))
-            attempts[code] = len(previous)
-            if previous:
-                latest[code] = json.loads(previous[-1].read_text(encoding="utf-8"))
+        attempts = Counter()
+        latest_paths = {}
+        school_ids = {school.school_id for school in schools}
+        for path in sorted(receipts.glob("*.json")):
+            school_id = path.stem.rsplit("-", 1)[0]
+            if school_id not in school_ids:
+                raise SystemExit(f"school receipt outside preserved roster: {path.name}")
+            attempts[school_id] += 1
+            latest_paths[school_id] = path
+        for school_id, path in latest_paths.items():
+            latest[school_id] = json.loads(path.read_text(encoding="utf-8"))
         pending = [
             school for school in schools
             if school.school_id not in latest or (
@@ -256,7 +315,8 @@ def main() -> None:
                     break
                 batch = pending[start:start + args.workers]
                 jobs = [pool.submit(collect_school, school, project, raw, args.year,
-                                    args.round, args.pause, stop) for school in batch]
+                                    args.round, args.pause, stop, verified_ids.get(school.school_id))
+                        for school in batch]
                 for job in jobs:
                     result = job.result()
                     code = result["school_id"]

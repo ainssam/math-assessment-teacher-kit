@@ -89,7 +89,9 @@ def post_with_retry(
     raise last_error
 
 
-def resolve_shl_idf(opener_value: urllib.request.OpenerDirector, school: School) -> tuple[str, str]:
+def resolve_shl_idf(
+    opener_value: urllib.request.OpenerDirector, school: School, *, require_region_match: bool = False,
+) -> tuple[str, str]:
     try:
         result = post_with_retry(opener_value, SEARCH_URL, {"SEARCH_WORD": school.school_name}, 10)
         payload = json.loads(result.body)
@@ -101,6 +103,19 @@ def resolve_shl_idf(opener_value: urllib.request.OpenerDirector, school: School)
     ]
     if not matches:
         return "", "school_search_no_match: Schoolinfo autocomplete returned no exact high-school match"
+    if require_region_match:
+        office_prefix = school.education_office_code[:1].upper()
+        region_matches = [
+            item for item in matches
+            if str(item.get("USER_DFN_CODE_VALUE_01", "")) == school.region_sido
+        ]
+        office_matches = [
+            item for item in matches
+            if office_prefix and str(item.get("SHL_CD", "")).upper().startswith(office_prefix)
+        ]
+        matches = region_matches or office_matches
+        if not matches:
+            return "", "school_search_region_mismatch: no exact school in the requested region"
     if len(matches) > 1:
         office_prefix = school.education_office_code[:1].upper()
         office_matches = [
