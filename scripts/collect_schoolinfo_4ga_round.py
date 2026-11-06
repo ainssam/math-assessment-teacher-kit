@@ -40,6 +40,10 @@ DOWNLOAD_FORM = re.compile(r'<form\b[^>]*\bid="eiFileDownForm"[^>]*>(.*?)</form>
 ROUND_SELECTOR = re.compile(r'<select\b[^>]*\bid="select_trans_dt"[^>]*>(.*?)</select>', re.I | re.S)
 ROUND_OPTION = re.compile(r'<option\b[^>]*\bvalue="(\d+)"[^>]*\bselected\b[^>]*>', re.I)
 ANY_ROUND_OPTION = re.compile(r'<option\b[^>]*\bvalue="(\d+)"', re.I)
+DISCLOSURE_EXCLUSION = re.compile(
+    r"현\s*항목은\s*아래와\s*같은\s*이유로\s*공시제외\s*합니다\.\s*</p>\s*"
+    r'<div\s+class="emptyct">\s*사유\s*:\s*([^<]+)\s*</div>', re.S,
+)
 NON_PLAN = re.compile(r"학업\s*성적\s*관리\s*(?:규정|위원회)|협의록|회의록")
 PLAN = re.compile(r"평가\s*(?:계획|운영|안)|교수\s*[·ㆍ\-]?\s*학습")
 TERM = re.compile(r"([12])\s*학기")
@@ -131,6 +135,10 @@ def collect_school(
         record["confirmed_round"] = options[0]
         attachments = named_attachments(page.body, request)
         if not attachments:
+            exclusion = DISCLOSURE_EXCLUSION.search(page.body)
+            if exclusion:
+                reason = " ".join(exclusion[1].split())
+                return {**record, "status": "disclosure_exclusion_reported", "detail": reason}
             classification = classify_response_html(int(page.status_code), page.body)
             if classification.result_status == "blocked":
                 stop.set()

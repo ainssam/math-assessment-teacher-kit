@@ -21,9 +21,10 @@
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 scripts/fetch_schoolinfo_high_school_directory.py --snapshot 2026-11-06
 .\.venv\Scripts\python.exe -X utf8 scripts/fetch_schoolinfo_high_school_directory.py --snapshot 2026-11-06 --school-kind other
+.\.venv\Scripts\python.exe -X utf8 scripts/fetch_schoolinfo_public_basic_roster.py --year 2026 --snapshot 2026-11-06-public-basic
 ```
 
-명부를 대조할 때 학교명과 시도를 함께 비교합니다. 일치하는 행이 여럿이면 주소와 학교알리미 ID를 확인합니다. 같은 이름으로 검색되더라도 지역이 다른 학교의 문서는 별도로 두세요.
+명부를 대조할 때 학교명과 시도를 함께 비교합니다. 일치하는 행이 여럿이면 주소와 학교알리미 ID를 확인합니다. 같은 이름으로 검색되더라도 지역이 다른 학교의 문서는 별도로 두세요. 세 번째 명령은 일반 학교 검색에 나오지 않는 학교를 확인할 수 있도록 기준연도의 학교기본정보를 받아 옵니다. [학교알리미 공개용 데이터](https://www.schoolinfo.go.kr/ng/go/pnnggo_a01_l2.do)
 
 ## 2. 원문 수집
 
