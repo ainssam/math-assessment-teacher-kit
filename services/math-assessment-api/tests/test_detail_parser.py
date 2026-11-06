@@ -131,6 +131,31 @@ def test_a_task_mention_in_a_teaching_schedule_cannot_supply_a_card() -> None:
     assert _hinted_table_items(schedule, "대수", "subject_heading", 0, ("자료 분석 프로젝트",)) == []
 
 
+def test_assessment_method_matrix_reads_only_the_performance_columns() -> None:
+    source = """
+# 미적분Ⅰ
+## 평가 영역 및 반영 비율
+<table>
+<tr><th>평가방법</th><th colspan="2">정기시험</th><th colspan="2">수행평가</th></tr>
+<tr><th>반영비율</th><td colspan="2">60%</td><td colspan="2">40%</td></tr>
+<tr><th rowspan="2">평가 요소<br>(방법)</th><td colspan="2">1회고사</td>
+    <td rowspan="2">함수 변화율 설명</td><td rowspan="2">미분 주제 탐구 보고서</td></tr>
+<tr><td>선택형</td><td>서술형</td></tr>
+<tr><th>영역 만점</th><td>80점</td><td>20점</td><td>100점</td><td>100점</td></tr>
+<tr><th>세부 반영 비율(%)</th><td>48%</td><td>12%</td><td>15%</td><td>25%</td></tr>
+<tr><th>평가 시기</th><td colspan="2">고사기간</td><td>9월</td><td>8~11월</td></tr>
+<tr><th>성취기준</th><td colspan="2">[12미적Ⅰ-01-01]</td>
+    <td>[12미적Ⅰ-01-01]</td><td>[12미적Ⅰ-02-01]</td></tr>
+</table>
+"""
+    items = parse_assessment_section(source, "미적분Ⅰ").items
+    assert [(item.title, item.score, item.weight, item.timing) for item in items] == [
+        ("함수 변화율 설명", "100점", "15%", "9월"),
+        ("미분 주제 탐구 보고서", "100점", "25%", "8~11월"),
+    ]
+    assert all(not item.method and not item.rubric_html for item in items)
+
+
 def test_combined_plan_uses_exact_short_course_heading_boundary() -> None:
     source = """
     수학과 평가계획

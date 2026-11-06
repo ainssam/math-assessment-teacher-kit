@@ -1184,11 +1184,12 @@ def _matrix_table_items(
                 continue
             first = compact_text(row[0])
             row_labels = [compact_text(cell) for cell in row]
-            if first in {"평가종류", "평가구분", "평가유형", "구분"} and any(
+            if first in {"평가종류", "평가구분", "평가유형", "구분", "평가방법"} and any(
                 "수행평가" in label for label in row_labels[1:]
             ):
-                category_row = row
-            if first in {"평가영역", "평가영역명", "평가내용", "수행평가명", "과제명", "횟수영역"}:
+                if first != "평가방법" or any("정기시험" in label for label in row_labels[1:]):
+                    category_row = row
+            if first in {"평가영역", "평가영역명", "평가내용", "수행평가명", "과제명", "횟수영역", "평가요소방법"}:
                 title_row = row
         if category_row is None or title_row is None:
             continue
@@ -1209,6 +1210,8 @@ def _matrix_table_items(
                 if not row or column >= len(row):
                     continue
                 label = visible_text(row[0]).strip()
+                if row is category_row and compact_text(label) == "평가방법":
+                    continue
                 cell_value = visible_text(row[column]).strip()
                 if not label or not cell_value or len(compact_text(label)) > 40:
                     continue
@@ -1228,7 +1231,8 @@ def _matrix_table_items(
             # the separate weight in each task's own score cell.
             own_weight = next(
                 (_first_pattern([value], WEIGHT_VALUE_RE) for label, value in pairs
-                 if "만점" in compact_text(label) and "반영비율" in compact_text(label)),
+                 if ("만점" in compact_text(label) and "반영비율" in compact_text(label))
+                 or compact_text(label) == "세부반영비율"),
                 "",
             )
             if own_weight:
@@ -1641,7 +1645,8 @@ CHECKED_CUSTOM_METHOD_RE = re.compile(
     re.I,
 )
 TIMING_VALUE_RE = re.compile(
-    r"(?:\d{1,2}\s*월(?:\s*\d{1,2}\s*주)?"
+    r"(?:\d{1,2}\s*월?\s*[~∼～\-]\s*\d{1,2}\s*월(?!\s*\d{1,2}\s*주)|"
+    r"\d{1,2}\s*월(?:\s*\d{1,2}\s*주)?"
     r"(?:\s*[~∼～\-]\s*(?:\d{1,2}\s*월\s*)?\d{1,2}\s*주)?|"
     r"\d{1,2}\s*차시|수시|상시|학기\s*(?:중|말)|단원\s*(?:종료|말))"
 )
