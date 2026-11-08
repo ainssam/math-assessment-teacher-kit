@@ -138,7 +138,7 @@ export default function ReviewWorkspace() {
           {selectedCase && draft ? (
             <section className="reviewCanvas" aria-labelledby="selected-review-title">
               <div className="reviewCaseHeader">
-                <div><span>{selectedCase.curriculum} 개정 · {selectedCase.subject}</span><h2 id="selected-review-title">{selectedCase.primary_task_name}</h2><p>{selectedCase.school_name || "학교명 미확인"} · {selectedCase.region || "지역 미확인"}</p></div>
+                <div><span>{selectedCase.curriculum === "shared" ? "교육과정 확인 필요" : `${selectedCase.curriculum} 개정`} · {selectedCase.subject}</span><h2 id="selected-review-title">{selectedCase.primary_task_name}</h2><p>{selectedCase.school_name || "학교명 미확인"} · {selectedCase.region || "지역 미확인"}</p></div>
                 <div><button type="button" onClick={removeSelected}>검토함에서 빼기</button>{selectedCase.source_url ? <a href={selectedCase.source_url} target="_blank" rel="noreferrer">학교알리미 원문 ↗</a> : null}</div>
               </div>
               <details className="reviewEvidence" open><summary>판단 근거 발췌</summary><p>{selectedCase.evidence_excerpt || "공개용 근거 발췌를 만들지 못했습니다."}</p></details>

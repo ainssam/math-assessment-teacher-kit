@@ -2,7 +2,7 @@
 
 import Link from "../SiteLink";
 import MathText from "../MathText";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
@@ -15,11 +15,18 @@ import {
   type SubjectListResponse,
 } from "../lib/catalog-api";
 import { loadReviewState, queueCase, saveReviewState } from "../review/review-store";
+import CasePeriod, { CURRENT_ACADEMIC_YEAR } from "./CasePeriod";
 
 const PAGE_SIZE = 20;
+const SEMESTER_OPTIONS = [
+  ["", "전체 자료"],
+  ["1", `${CURRENT_ACADEMIC_YEAR}학년도 1학기`],
+  ["2", `${CURRENT_ACADEMIC_YEAR}학년도 2학기`],
+  ["unknown", "학년도·학기 미확인"],
+] as const;
 
 function safeCurriculum(value: string | null) {
-  return value === "2015" || value === "2022" ? value : "";
+  return value === "2015" || value === "2022" || value === "shared" ? value : "";
 }
 
 function safeOffset(value: string | null) {
@@ -38,13 +45,17 @@ function uniqueSubjectOptions(subjects: SubjectItem[], curriculum: string) {
 
 export default function CasesExplorer() {
   const searchParameters = useSearchParams();
-  const router = useRouter();
   const initialCurriculum = safeCurriculum(searchParameters.get("curriculum"));
   const initialSubject = searchParameters.get("subject") || "";
   const initialQuery = searchParameters.get("q") || "";
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
   const [curriculum, setCurriculum] = useState(initialCurriculum);
   const [subject, setSubject] = useState(initialSubject);
+  const [semester, setSemester] = useState(() => {
+    const value = searchParameters.get("semester");
+    return value === "1" || value === "2" || value === "unknown" ? value : "";
+  });
+  const academicYear = semester === "1" || semester === "2" ? CURRENT_ACADEMIC_YEAR : undefined;
   const [region, setRegion] = useState(searchParameters.get("region") || "");
   const [district, setDistrict] = useState(searchParameters.get("district") || "");
   const [tag, setTag] = useState(searchParameters.get("tag") || "");
@@ -64,7 +75,7 @@ export default function CasesExplorer() {
     const controller = new AbortController();
     fetchCatalog<SubjectListResponse>("subjects", controller.signal)
       .then((payload) => {
-        setSubjects(payload.items.filter((item) => item.curriculum !== "shared"));
+        setSubjects(payload.items);
         setSubjectNotice("");
       })
       .catch(() => {
@@ -77,7 +88,7 @@ export default function CasesExplorer() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const parameters = apiParameters({ curriculum, subject, region });
+    const parameters = apiParameters({ curriculum, subject, region, semester, academic_year: academicYear });
     fetchCatalog<FacetResponse>(`facets?${parameters}`, controller.signal)
       .then((payload) => {
         setFacets(payload);
@@ -89,7 +100,7 @@ export default function CasesExplorer() {
         }
       });
     return () => controller.abort();
-  }, [curriculum, subject, region]);
+  }, [curriculum, subject, region, semester, academicYear]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -99,6 +110,8 @@ export default function CasesExplorer() {
       region,
       district,
       tag,
+      semester,
+      academic_year: academicYear,
       query,
       include_ambiguous: true,
       limit: PAGE_SIZE,
@@ -113,15 +126,16 @@ export default function CasesExplorer() {
       .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [curriculum, subject, region, district, tag, query, offset]);
+  }, [curriculum, subject, region, district, tag, semester, academicYear, query, offset]);
 
   useEffect(() => {
     const parameters = apiParameters({
-      curriculum, subject, region, district, tag, q: query,
+      curriculum, subject, region, district, tag, semester, q: query,
       page: offset ? Math.floor(offset / PAGE_SIZE) + 1 : undefined,
     });
-    router.replace(parameters ? `/cases?${parameters}` : "/cases", { scroll: false });
-  }, [curriculum, subject, region, district, tag, query, offset, router]);
+    const url = parameters ? `/cases?${parameters}` : "/cases";
+    if (window.location.pathname + window.location.search !== url) window.history.replaceState(null, "", url);
+  }, [curriculum, subject, region, district, tag, semester, query, offset]);
 
   const courseOptions = useMemo(
     () => uniqueSubjectOptions(subjects, curriculum),
@@ -129,7 +143,7 @@ export default function CasesExplorer() {
   );
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const activeFilterCount = [curriculum, subject, region, district, tag, query].filter(Boolean).length;
+  const activeFilterCount = [curriculum, subject, semester, region, district, tag, query].filter(Boolean).length;
 
   function beginReload() {
     setLoading(true);
@@ -157,9 +171,10 @@ export default function CasesExplorer() {
   }
 
   function clearFilters() {
-    beginReload();
+    if (activeFilterCount || offset) beginReload();
     setCurriculum("");
     setSubject("");
+    setSemester("");
     setRegion("");
     setDistrict("");
     setTag("");
@@ -185,18 +200,25 @@ export default function CasesExplorer() {
         <p><strong>{total.toLocaleString()}</strong><span>현재 조건의 사례</span></p>
       </header>
 
-      <section className="librarySplitNotice" aria-label="라이브러리 이용 안내">
-        <div><strong>유형별로 먼저 보고 싶다면</strong><span>원문 표 제목·루브릭·성취기준이 함께 확인된 사례만 우선순위로 봅니다.</span></div>
-        <Link href="/references">유형별 설계 참고 보기 →</Link>
-      </section>
-
       <section className="caseFilterPanel" aria-labelledby="case-filter-title">
-        <div className="caseFilterTopline"><div><span className="stepPill">필터</span><h2 id="case-filter-title">전체 라이브러리 찾기</h2></div><button type="button" onClick={clearFilters}>전체로 초기화{activeFilterCount ? ` (${activeFilterCount})` : ""}</button></div>
+        <div className="caseFilterTopline"><h2 id="case-filter-title">사례 찾기</h2><button type="button" onClick={clearFilters}>전체로 초기화{activeFilterCount ? ` (${activeFilterCount})` : ""}</button></div>
+        <fieldset className="semesterFilter">
+          <legend>학년도·학기</legend>
+          <div className="semesterChoices designTopicOptions">
+            {SEMESTER_OPTIONS.map(([value, label]) => (
+              <label key={value}>
+                <input type="radio" name="case-semester" value={value} checked={semester === value}
+                  onChange={() => { beginReload(); setSemester(value); setOffset(0); }} />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <div className="filterControls caseCourseControls">
-          <label><span>교육과정</span><select value={curriculum} onChange={(event) => changeCurriculum(event.target.value)}><option value="">전체 교육과정</option><option value="2015">2015 개정</option><option value="2022">2022 개정</option></select></label>
-          <label className="wideControl"><span>수학 과목</span><select value={subject} onChange={(event) => changeSubject(event.target.value)}><option value="">전체 수학 과목</option>{courseOptions.map((item) => <option key={item.subject} value={item.subject}>{item.subject} · {item.documents.toLocaleString()}건</option>)}</select></label>
-          <label><span>시·도</span><select value={region} onChange={(event) => { beginReload(); setRegion(event.target.value); setDistrict(""); setOffset(0); }}><option value="">전국</option>{facets.regions.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><span>시·군·구</span><select value={district} onChange={(event) => { beginReload(); setDistrict(event.target.value); setOffset(0); }} disabled={!region}><option value="">{region ? "전체 시·군·구" : "시·도를 먼저 선택"}</option>{region ? facets.districts.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>) : null}</select></label>
+          <label><span>교육과정</span><select value={curriculum} onChange={(event) => changeCurriculum(event.target.value)}><option value="">전체 교육과정</option><option value="2015">2015 개정</option><option value="2022">2022 개정</option><option value="shared">교육과정 확인 필요</option></select></label>
+          <label className="wideControl"><span>수학 과목</span><select value={subject} onChange={(event) => changeSubject(event.target.value)}><option value="">전체 수학 과목</option>{courseOptions.map((item) => <option key={item.subject} value={item.subject}>{item.subject}</option>)}</select></label>
+          <label><span>시·도</span><select value={region} onChange={(event) => { beginReload(); setRegion(event.target.value); setDistrict(""); setOffset(0); }}><option value="">전국</option>{region && !facets.regions.some((item) => item.value === region) ? <option value={region}>{region}</option> : null}{facets.regions.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
+          <label><span>시·군·구</span><select value={district} onChange={(event) => { beginReload(); setDistrict(event.target.value); setOffset(0); }} disabled={!region}><option value="">{region ? "전체 시·군·구" : "시·도를 먼저 선택"}</option>{district && !facets.districts.some((item) => item.value === district) ? <option value={district}>{district}</option> : null}{region ? facets.districts.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>) : null}</select></label>
         </div>
         <form className="caseSearch" onSubmit={submitSearch} role="search">
           <label htmlFor="case-query">수행평가명·평가 개요·학교 검색</label>
@@ -207,12 +229,17 @@ export default function CasesExplorer() {
           <button type="button" className={!tag ? "selected" : ""} onClick={() => { beginReload(); setTag(""); setOffset(0); }}>전체</button>
           {facets.action_tags.slice(0, 9).map((item) => <button type="button" className={tag === item.value ? "selected" : ""} aria-pressed={tag === item.value} key={item.value} onClick={() => { beginReload(); setTag(item.value === tag ? "" : item.value); setOffset(0); }}>{item.value}<span>{item.count}</span></button>)}
         </fieldset>
-        <div className="activeFilters caseActiveFilters" aria-label="적용된 필터"><span>적용</span><strong>{curriculum ? `${curriculum} 개정` : "전체 교육과정"}</strong><strong>{subject || "전체 수학 과목"}</strong><strong>원문 경계 확인 자료만</strong>{region ? <button type="button" onClick={() => { beginReload(); setRegion(""); setDistrict(""); setOffset(0); }}>{region} ×</button> : null}{district ? <button type="button" onClick={() => { beginReload(); setDistrict(""); setOffset(0); }}>{district} ×</button> : null}{tag ? <button type="button" onClick={() => { beginReload(); setTag(""); setOffset(0); }}>{tag} ×</button> : null}{query ? <button type="button" onClick={() => { beginReload(); setQuery(""); setQueryInput(""); setOffset(0); }}>{query} ×</button> : null}</div>
+        <div className="activeFilters caseActiveFilters" aria-label="적용된 필터"><span>적용</span><strong>{curriculum === "shared" ? "교육과정 확인 필요" : curriculum ? `${curriculum} 개정` : "전체 교육과정"}</strong><strong>{subject || "전체 수학 과목"}</strong><strong>원문 경계 확인 자료만</strong>{region ? <button type="button" onClick={() => { beginReload(); setRegion(""); setDistrict(""); setOffset(0); }}>{region} ×</button> : null}{district ? <button type="button" onClick={() => { beginReload(); setDistrict(""); setOffset(0); }}>{district} ×</button> : null}{tag ? <button type="button" onClick={() => { beginReload(); setTag(""); setOffset(0); }}>{tag} ×</button> : null}{query ? <button type="button" onClick={() => { beginReload(); setQuery(""); setQueryInput(""); setOffset(0); }}>{query} ×</button> : null}</div>
         {subjectNotice || facetNotice ? <p className="filterNotice" role="status">{[subjectNotice, facetNotice].filter(Boolean).join(" ")}</p> : null}
       </section>
 
+      <section className="librarySplitNotice" aria-label="라이브러리 이용 안내">
+        <div><strong>미적분Ⅰ에서 같은 주제의 다른 방법을 찾고 있나요?</strong><span>2026학년도 2학기 사례를 주제와 방법으로 함께 골라 볼 수 있습니다.</span></div>
+        <Link href="/references">미적분Ⅰ 주제 × 방법 보기</Link>
+      </section>
+
       <section className="caseResults" aria-labelledby="case-results-title" aria-busy={loading}>
-        <div className="resultHeading"><div><span className="stepPill">결과</span><div><h2 id="case-results-title">평가 구조 표</h2><p>{total.toLocaleString()}건 중 {total ? offset + 1 : 0}–{Math.min(offset + PAGE_SIZE, total)}건</p></div></div><Link href={`/trends?${apiParameters({ curriculum, subject })}`}>과목별 경향 보기</Link></div>
+        <div className="resultHeading"><div><span className="stepPill">결과</span><div><h2 id="case-results-title">평가 구조 표</h2><p>{total.toLocaleString()}건 중 {total ? offset + 1 : 0}–{Math.min(offset + PAGE_SIZE, total)}건</p></div></div><Link href={`/trends?${apiParameters({ curriculum, subject })}`}>전체 자료의 과목별 경향 보기</Link></div>
         {loading ? <CaseSkeletons /> : null}
         {error ? <div className="errorPanel" role="alert"><strong>자료를 불러오지 못했습니다.</strong><p>{error}</p></div> : null}
         {!loading && !error && cases.length === 0 ? <div className="emptyPanel"><strong>조건에 맞는 사례가 없습니다.</strong><p>검색어 또는 필터를 조정해 보세요.</p></div> : null}
@@ -265,7 +292,7 @@ export function CaseTableRow({ item }: { item: CaseItem }) {
 
   return <tr>
     <td data-label="수행평가명·학교" className="caseIdentityCell">
-      <div className="caseBadges"><span>{item.curriculum === "shared" ? "교육과정 교차" : `${item.curriculum} 개정`}</span><span>{item.subject}</span></div>
+      <div className="caseBadges"><span>{item.curriculum === "shared" ? "교육과정 확인 필요" : `${item.curriculum} 개정`}</span><span>{item.subject}</span><CasePeriod years={item.academic_years} semesters={item.semesters} /></div>
       {taskNames.length > 1 ? (
         <div className="confirmedTaskList">
           <span>확인된 수행평가 {taskNames.length}개</span>
@@ -298,7 +325,7 @@ export function CaseCard({ item }: { item: CaseItem }) {
   const titleWasDetected = hasSourceGroundedTaskTitle(item);
   const markerCount = Object.values(item.evidence_markers).filter((value) => value > 0).length;
   return <article className="caseCard">
-    <div className="caseCardTopline"><div className="caseBadges"><span>{item.curriculum} 개정</span><span>{item.subject}</span></div><div className="evidenceScore" title="원문에서 확인된 항목 수"><small>근거 항목</small><strong>{markerCount}<span>/4</span></strong></div></div>
+    <div className="caseCardTopline"><div className="caseBadges"><span>{item.curriculum === "shared" ? "교육과정 확인 필요" : `${item.curriculum} 개정`}</span><span>{item.subject}</span><CasePeriod years={item.academic_years} semesters={item.semesters} /></div><div className="evidenceScore" title="원문에서 확인된 항목 수"><small>근거 항목</small><strong>{markerCount}<span>/4</span></strong></div></div>
     <div className="caseTitle"><span>{titleWasDetected ? "원문 표·제목에서 확인한 수행평가명" : "원문 확인 대상"}</span><h3>{titleWasDetected ? item.primary_task_name : "평가영역명 원문 확인 필요"}</h3>{!titleWasDetected ? <p>근거 없는 이름을 만들지 않고 원문 확인 대상으로 남겨 두었습니다.</p> : null}</div>
     <p className="caseCardLocation">{item.school_name} · {item.region}{item.district ? ` ${item.district}` : ""}</p>
     <section className="evidenceExcerpt"><strong>정리한 발췌</strong><p>{excerptPreview}</p>{hasMoreExcerpt ? <details className="evidenceDetails"><summary>전체 발췌 보기</summary><p>{item.evidence_excerpt}</p></details> : null}</section>

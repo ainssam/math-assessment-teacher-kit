@@ -7,6 +7,7 @@ export type SegmentedSourceHtml = {
   orphanStandardGroupCount: number;
   recoveredNoteGroupCount: number;
   clampedRowspanCount: number;
+  clippedColspanCount: number;
   gradeContinuationRowCount: number;
   prunedTrailingColumnCount: number;
   normalizedLongHeaderCellCount: number;
@@ -14,6 +15,62 @@ export type SegmentedSourceHtml = {
 };
 
 type SectionKey = "overview" | "standards" | "method" | "rubric";
+
+/** Report remaining visible extraction faults without guessing missing values. */
+export function sourceDisplayNeedsReview(value: string) {
+  if (typeof DOMParser === "undefined") return false;
+  const document = new DOMParser().parseFromString(value, "text/html");
+  for (const fallback of document.querySelectorAll('details[data-source-extraction-fallback]')) fallback.remove();
+  if (/[\ue000-\uf8ff\ufffd]|\bgfedcb?\b/u.test(document.body.textContent || "")) return true;
+  for (const table of document.querySelectorAll("table")) {
+    const rows = Array.from(table.rows);
+    const grid: boolean[][] = rows.map(() => []);
+    for (const [r, row] of rows.entries()) {
+      let c = 0;
+      for (const cell of Array.from(row.cells)) {
+        while (grid[r][c]) c += 1;
+        for (let rr = r; rr < Math.min(rows.length, r + cell.rowSpan); rr += 1) {
+          for (let cc = c; cc < c + cell.colSpan; cc += 1) {
+            if (grid[rr][cc]) return true;
+            grid[rr][cc] = true;
+          }
+        }
+        c += cell.colSpan;
+      }
+    }
+  }
+  return false;
+}
+
+export function sourceTableKey(text: string) {
+  let hash = BigInt("14695981039346656037");
+  const mask = BigInt("18446744073709551615");
+  for (const char of text.normalize("NFKC").replace(/\s+/g, "")) {
+    hash = ((hash ^ BigInt(char.codePointAt(0)!)) * BigInt("1099511628211")) & mask;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+/** Keep unmatched source content visible; only collapse tables covered by crops. */
+export function hidePreviewedTables(value: string, keys: string[]) {
+  if (typeof DOMParser === "undefined" || !keys.length) return value;
+  const document = new DOMParser().parseFromString(value, "text/html");
+  const covered = new Set(keys);
+  for (const table of Array.from(document.body.querySelectorAll("table"))) {
+    if (table.parentElement?.closest("table") || !covered.has(sourceTableKey(table.textContent || ""))) continue;
+    const details = document.createElement("details");
+    details.className = "sourceExtractedTables";
+    details.setAttribute("data-source-extraction-fallback", "true");
+    details.setAttribute("data-source-covered-key", sourceTableKey(table.textContent || ""));
+    const summary = document.createElement("summary");
+    summary.textContent = "대응하는 추출 표 함께 보기";
+    const note = document.createElement("p");
+    note.textContent = "수식과 병합은 위 원문 표를 기준으로 확인해 주세요.";
+    table.before(details);
+    details.append(summary, note, table);
+  }
+  return document.body.innerHTML;
+}
 
 type SectionRange = {
   key: SectionKey;
@@ -61,7 +118,7 @@ function inferredInitialSection(rows: HTMLTableRowElement[]): SectionKey {
   const explicit = rowSection(rows[0]);
   if (explicit) return explicit;
   const sample = compact(rows.slice(0, 8).map((row) => row.textContent || "").join(" "));
-  if (/\[12[A-Za-z가-힣ⅠⅡ]{1,16}\d{2}[-‐‑‒–—]\d{2}\]/u.test(sample)) return "standards";
+  if (/\[(?:10|12)[A-Za-z가-힣ⅠⅡ\d]{1,20}[-‐‑‒–—]?\d{2}[-‐‑‒–—]\d{2}\]/u.test(sample)) return "standards";
   if (/(?:^|[^A-Za-z])A(?:[^A-Za-z]|$)/.test(sample) && /수있다/.test(sample)) return "standards";
   if (/평가요소|채점기준|수행수준|배점/.test(sample)) return "rubric";
   return "overview";
@@ -296,7 +353,7 @@ function mergeSuffixContinuationTables(document: Document) {
   return reconstructedCellCount;
 }
 
-const ORPHAN_STANDARD_RE = /^\s*(?:\[\s*12[A-Za-z가-힣ⅠⅡ]{1,16}\s*\d{2}\s*[-‐‑‒–—]\s*\d{2}\s*\]\s*)+$/u;
+const ORPHAN_STANDARD_RE = /^\s*(?:\[\s*(?:10|12)[A-Za-z가-힣ⅠⅡ\d]{1,20}\s*[-‐‑‒–—]?\s*\d{2}\s*[-‐‑‒–—]\s*\d{2}\s*\]\s*)+$/u;
 
 function groupOrphanAchievementStandards(document: Document) {
   let groupCount = 0;
@@ -397,6 +454,48 @@ function clampOverflowingRowspans(document: Document) {
     }
   }
   return clampedCount;
+}
+
+/**
+ * Old PDF grids sometimes extend the last content cell into a blank vertical
+ * spacer already occupied by a rowspan. Original PDF comparisons confirm that
+ * both cells end at the spacer boundary. Clip only this empty trailing overlap;
+ * never move, truncate, or overwrite another populated cell.
+ */
+function clipBlankSpacerOverlaps(document: Document) {
+  let clippedCount = 0;
+  for (const table of Array.from(document.body.querySelectorAll("table"))) {
+    const rows = Array.from(table.rows);
+    const occupied: (HTMLTableCellElement | undefined)[][] = rows.map(() => []);
+    for (const [rowIndex, row] of rows.entries()) {
+      let column = 0;
+      const cells = Array.from(row.cells);
+      for (const [cellIndex, cell] of cells.entries()) {
+        while (occupied[rowIndex][column]) column += 1;
+        let span = Math.max(1, cell.colSpan);
+        const collisions = Array.from({ length: span }, (_, offset) => ({
+          offset, active: occupied[rowIndex][column + offset],
+        })).filter((entry) => entry.active);
+        const first = collisions[0]?.offset;
+        const trailingCell = cells.slice(cellIndex + 1).every((next) => !compact(next.textContent || ""));
+        if (first && trailingCell && collisions.every((entry) => !compact(entry.active!.textContent || ""))
+          && Array.from({ length: span - first }, (_, offset) => occupied[rowIndex][column + first + offset]).every(Boolean)) {
+          span = first;
+          if (span > 1) cell.setAttribute("colspan", String(span));
+          else cell.removeAttribute("colspan");
+          cell.setAttribute("data-source-colspan-clipped", "true");
+          clippedCount += 1;
+        }
+        for (let r = rowIndex; r < Math.min(rows.length, rowIndex + Math.max(1, cell.rowSpan)); r += 1) {
+          for (let c = column; c < column + span; c += 1) {
+            occupied[r][c] ||= cell;
+          }
+        }
+        column += span;
+      }
+    }
+  }
+  return clippedCount;
 }
 
 function sectionRanges(rows: HTMLTableRowElement[]): SectionRange[] {
@@ -608,6 +707,7 @@ export function segmentSourceTables(value: string): SegmentedSourceHtml {
       orphanStandardGroupCount: 0,
       recoveredNoteGroupCount: 0,
       clampedRowspanCount: 0,
+      clippedColspanCount: 0,
       gradeContinuationRowCount: 0,
       prunedTrailingColumnCount: 0,
       normalizedLongHeaderCellCount: 0,
@@ -616,6 +716,7 @@ export function segmentSourceTables(value: string): SegmentedSourceHtml {
   }
 
   const document = new DOMParser().parseFromString(value, "text/html");
+  const clippedColspanCount = clipBlankSpacerOverlaps(document);
   const reconstructedCellCount = mergeSuffixContinuationTables(document);
   let gradeContinuationRowCount = mergeAchievementLevelContinuations(document);
   const mergedFragmentCount = mergeRepeatedHeaderTables(document);
@@ -681,6 +782,7 @@ export function segmentSourceTables(value: string): SegmentedSourceHtml {
     orphanStandardGroupCount,
     recoveredNoteGroupCount,
     clampedRowspanCount,
+    clippedColspanCount,
     gradeContinuationRowCount,
     prunedTrailingColumnCount,
     normalizedLongHeaderCellCount,

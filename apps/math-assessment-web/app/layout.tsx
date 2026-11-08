@@ -1,11 +1,14 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import Link from "./SiteLink";
+import { ServiceWorkerRegistration } from "./InstallApp";
 
 import "@fontsource/gowun-dodum/korean.css";
 import "katex/dist/katex.min.css";
 import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "./globals.css";
+import "./design-explorer.css";
+import "./standards/standards.css";
 import VisitorCounter from "./VisitorCounter";
 
 export const metadata: Metadata = {
@@ -17,6 +20,8 @@ export const metadata: Metadata = {
   description:
     "2026학년도 교수·학습 및 평가계획에서 다른 학교의 수학 수행평가명과 활동 내용을 찾아보는 교사용 아카이브",
   alternates: { canonical: "/" },
+  icons: { apple: "/icons/app-180.png" },
+  appleWebApp: { capable: true, title: "수학 수행평가" },
   openGraph: {
     title: "2026 수학 수행평가 아이디어 아카이브",
     description: "2026학년도 교수·학습 및 평가계획에서 수학 수행평가명·활동 내용·평가 기준을 찾아보고 비교합니다.",
@@ -26,6 +31,8 @@ export const metadata: Metadata = {
     type: "website",
   },
 };
+
+export const viewport: Viewport = { themeColor: "#1d4ed8" };
 
 const navigation = [
   { href: "/trends", label: "공개자료 경향" },
@@ -85,6 +92,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             </div>
           </div>
         </footer>
+        <ServiceWorkerRegistration />
         {process.env.NEXT_PUBLIC_MATH_ASSESSMENT_ENABLE_ANALYTICS === "1" && <Analytics />}
       </body>
     </html>

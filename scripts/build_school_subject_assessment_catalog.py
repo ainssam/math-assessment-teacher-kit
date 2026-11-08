@@ -16,19 +16,37 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
-
 
 SUBJECTS: dict[str, tuple[str, ...]] = {
     "2015": (
-        "수학", "수학Ⅰ", "수학Ⅱ", "미적분", "확률과 통계", "기하",
-        "실용 수학", "경제 수학", "수학과제 탐구",
+        "수학",
+        "수학Ⅰ",
+        "수학Ⅱ",
+        "미적분",
+        "확률과 통계",
+        "기하",
+        "실용 수학",
+        "경제 수학",
+        "수학과제 탐구",
+        "인공지능 수학",
     ),
     "2022": (
-        "공통수학1", "공통수학2", "기본수학1", "기본수학2", "대수",
-        "미적분Ⅰ", "미적분Ⅱ", "확률과 통계", "기하", "경제 수학",
-        "인공지능 수학", "직무 수학", "수학과 문화", "실용 통계",
+        "공통수학1",
+        "공통수학2",
+        "기본수학1",
+        "기본수학2",
+        "대수",
+        "미적분Ⅰ",
+        "미적분Ⅱ",
+        "확률과 통계",
+        "기하",
+        "경제 수학",
+        "인공지능 수학",
+        "직무 수학",
+        "수학과 문화",
+        "실용 통계",
         "수학과제 탐구",
     ),
 }
@@ -42,7 +60,9 @@ def atomic_text_path(target: Path) -> tuple[Path, int]:
 
 
 def source_key(source: dict[str, object]) -> str:
-    return str(source.get("saved_path") or source.get("final_url") or source.get("candidate_name") or "")
+    return str(
+        source.get("saved_path") or source.get("final_url") or source.get("candidate_name") or ""
+    )
 
 
 def school_key(source: dict[str, object]) -> str:
@@ -65,7 +85,10 @@ def extract_semesters(text: str) -> list[int]:
 
 def confirmed_cover_grade(source: dict[str, object], text: str) -> int | None:
     """Use an explicit cover heading when identical PDFs carry different names."""
-    if source.get("confirmed_semester") not in (1, 2) or Path(source_key(source)).suffix.lower() != ".pdf":
+    if (
+        source.get("confirmed_semester") not in (1, 2)
+        or Path(source_key(source)).suffix.lower() != ".pdf"
+    ):
         return None
     heading = re.search(r"(?m)^\s*20\d{2}\s*학년도\s*([123])\s*학년\s*([12])\s*학기", text[:400])
     if heading and int(heading[2]) == source["confirmed_semester"]:
@@ -87,9 +110,16 @@ def transition_curriculum(year: int, grade: int | None) -> str | None:
     return None
 
 
-def resolve_curriculum(record: dict[str, object], years: list[int], grades: list[int]) -> tuple[str, str]:
+def resolve_curriculum(
+    record: dict[str, object], years: list[int], grades: list[int]
+) -> tuple[str, str]:
     subject = str(record.get("subject") or "")
     hint = str(record.get("curriculum_hint") or "")
+    if subject == "인공지능 수학":
+        # Old detector records labelled this alias 2022-only. Its name and code
+        # family also occur in the 2015 course added by notice 2020-236, so that
+        # inherited hint cannot override the explicit cohort or resolve a mix.
+        hint = ""
     allowed = [curriculum for curriculum, names in SUBJECTS.items() if subject in names]
     if len(allowed) == 1:
         return allowed[0], "subject_unique_to_curriculum"
@@ -131,9 +161,17 @@ def main() -> None:
     parser.add_argument("--catalog-output", type=Path, required=True)
     parser.add_argument("--coverage-output", type=Path, required=True)
     parser.add_argument("--summary-output", type=Path, required=True)
-    parser.add_argument("--incomplete-schools", type=Path, help="JSON list of school keys with unresolved source coverage")
+    parser.add_argument(
+        "--incomplete-schools",
+        type=Path,
+        help="JSON list of school keys with unresolved source coverage",
+    )
     args = parser.parse_args()
-    incomplete_schools = set(json.loads(args.incomplete_schools.read_text(encoding="utf-8"))) if args.incomplete_schools else set()
+    incomplete_schools = (
+        set(json.loads(args.incomplete_schools.read_text(encoding="utf-8")))
+        if args.incomplete_schools
+        else set()
+    )
 
     for output in (args.catalog_output, args.coverage_output, args.summary_output):
         if output.exists():
@@ -147,8 +185,12 @@ def main() -> None:
                 schools[key] = row
 
     source_status: dict[str, str] = {}
-    school_source_status: dict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
-    sources_with_cover_grade: dict[tuple[str, str], list[tuple[int, dict[str, object]]]] = collections.defaultdict(list)
+    school_source_status: dict[str, collections.Counter[str]] = collections.defaultdict(
+        collections.Counter
+    )
+    sources_with_cover_grade: dict[tuple[str, str], list[tuple[int, dict[str, object]]]] = (
+        collections.defaultdict(list)
+    )
     for record in read_jsonl(args.source_index):
         source = record.get("source") or {}
         if not isinstance(source, dict):
@@ -168,12 +210,20 @@ def main() -> None:
     preferred_sources = {}
     for identity, options in sources_with_cover_grade.items():
         cover_grades = {grade for grade, _ in options}
-        declared_grades = {tuple(extract_grades(str(source.get("candidate_name") or ""))) for _, source in options}
+        declared_grades = {
+            tuple(extract_grades(str(source.get("candidate_name") or ""))) for _, source in options
+        }
         if len(cover_grades) != 1 or len(declared_grades) <= 1:
             continue
         grade = next(iter(cover_grades))
-        preferred = next((source for _, source in options
-                          if extract_grades(str(source.get("candidate_name") or "")) == [grade]), None)
+        preferred = next(
+            (
+                source
+                for _, source in options
+                if extract_grades(str(source.get("candidate_name") or "")) == [grade]
+            ),
+            None,
+        )
         if preferred:
             preferred_sources[identity] = preferred
 
@@ -194,26 +244,32 @@ def main() -> None:
             continue
         original_source = source
         preferred = preferred_sources.get((school_key(source), str(record.get("sha256") or "")))
-        if preferred and extract_grades(str(source.get("candidate_name") or "")) != extract_grades(str(preferred.get("candidate_name") or "")):
+        if preferred and extract_grades(str(source.get("candidate_name") or "")) != extract_grades(
+            str(preferred.get("candidate_name") or "")
+        ):
             source = preferred
         name = str(source.get("candidate_name") or "")
         evidence = str(record.get("evidence_text") or "")
         years = extract_years(name) or extract_years(evidence[:3000])
         grades = extract_grades(name)
         confirmed_semester = source.get("confirmed_semester")
-        semesters = [confirmed_semester] if confirmed_semester in (1, 2) else extract_semesters(name)
+        semesters = (
+            [confirmed_semester] if confirmed_semester in (1, 2) else extract_semesters(name)
+        )
         curriculum, basis = resolve_curriculum(record, years, grades)
         enriched = dict(record)
         if source is not original_source and source_key(source) != source_key(original_source):
             enriched["source"] = source
             enriched["duplicate_attachment_grade_reconciled_from"] = source_key(original_source)
-        enriched.update({
-            "resolved_curriculum": curriculum,
-            "curriculum_resolution_basis": basis,
-            "academic_years": years,
-            "grades": grades,
-            "semesters": semesters,
-        })
+        enriched.update(
+            {
+                "resolved_curriculum": curriculum,
+                "curriculum_resolution_basis": basis,
+                "academic_years": years,
+                "grades": grades,
+                "semesters": semesters,
+            }
+        )
         catalog_rows.append(enriched)
         school = school_key(source)
         subject = str(record.get("subject") or "")
@@ -222,12 +278,14 @@ def main() -> None:
         elif curriculum == "shared":
             ambiguous_found[(school, subject)].append(enriched)
 
-    catalog_rows.sort(key=lambda row: (
-        str((row.get("source") or {}).get("school_code") or ""),
-        str(row.get("resolved_curriculum") or ""),
-        str(row.get("subject") or ""),
-        str((row.get("source") or {}).get("candidate_name") or ""),
-    ))
+    catalog_rows.sort(
+        key=lambda row: (
+            str((row.get("source") or {}).get("school_code") or ""),
+            str(row.get("resolved_curriculum") or ""),
+            str(row.get("subject") or ""),
+            str((row.get("source") or {}).get("candidate_name") or ""),
+        )
+    )
 
     catalog_temp, fd = atomic_text_path(args.catalog_output)
     os.close(fd)
@@ -236,27 +294,55 @@ def main() -> None:
             handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
 
     coverage_fields = [
-        "school_code", "school_name", "region", "district", "school_type",
-        "curriculum", "subject", "coverage_status", "found_documents",
-        "ambiguous_curriculum_documents", "explicit_subject_documents",
-        "explicit_subject_incomplete", "school_extracted_ok", "school_extracted_short",
-        "school_extracted_failed", "interpretation_note",
+        "school_code",
+        "school_name",
+        "region",
+        "district",
+        "school_type",
+        "curriculum",
+        "subject",
+        "coverage_status",
+        "found_documents",
+        "ambiguous_curriculum_documents",
+        "explicit_subject_documents",
+        "explicit_subject_incomplete",
+        "school_extracted_ok",
+        "school_extracted_short",
+        "school_extracted_failed",
+        "interpretation_note",
     ]
     coverage_temp, fd = atomic_text_path(args.coverage_output)
     os.close(fd)
     status_counts: collections.Counter[str] = collections.Counter()
-    subject_counts: dict[tuple[str, str], collections.Counter[str]] = collections.defaultdict(collections.Counter)
+    subject_counts: dict[tuple[str, str], collections.Counter[str]] = collections.defaultdict(
+        collections.Counter
+    )
     with coverage_temp.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=coverage_fields)
         writer.writeheader()
-        for school, metadata in sorted(schools.items(), key=lambda item: (item[1].get("region_sido", ""), item[1].get("school_name", ""), item[0])):
+        for school, metadata in sorted(
+            schools.items(),
+            key=lambda item: (
+                item[1].get("region_sido", ""),
+                item[1].get("school_name", ""),
+                item[0],
+            ),
+        ):
             school_status = school_source_status.get(school, collections.Counter())
             for curriculum, subjects in SUBJECTS.items():
                 for subject in subjects:
                     direct = found.get((school, curriculum, subject), [])
-                    ambiguous = ambiguous_found.get((school, subject), []) if subject in SHARED_SUBJECTS else []
+                    ambiguous = (
+                        ambiguous_found.get((school, subject), [])
+                        if subject in SHARED_SUBJECTS
+                        else []
+                    )
                     explicit = explicit_sources.get((school, subject), [])
-                    incomplete = sum(source_status.get(key, "missing") in {"failed", "short", "missing", "unknown"} for key in explicit)
+                    incomplete = sum(
+                        source_status.get(key, "missing")
+                        in {"failed", "short", "missing", "unknown"}
+                        for key in explicit
+                    )
                     if direct:
                         status = "found"
                     elif ambiguous:
@@ -269,42 +355,61 @@ def main() -> None:
                         status = "offering_unknown"
                     status_counts[status] += 1
                     subject_counts[(curriculum, subject)][status] += 1
-                    writer.writerow({
-                        "school_code": school,
-                        "school_name": metadata.get("school_name", ""),
-                        "region": metadata.get("region_sido") or metadata.get("region", ""),
-                        "district": metadata.get("region_sgg") or metadata.get("district", ""),
-                        "school_type": metadata.get("high_school_type") or metadata.get("school_type", ""),
-                        "curriculum": curriculum,
-                        "subject": subject,
-                        "coverage_status": status,
-                        "found_documents": len(direct),
-                        "ambiguous_curriculum_documents": len(ambiguous),
-                        "explicit_subject_documents": len(explicit),
-                        "explicit_subject_incomplete": incomplete,
-                        "school_extracted_ok": school_status.get("ok", 0),
-                        "school_extracted_short": school_status.get("short", 0),
-                        "school_extracted_failed": school_status.get("failed", 0),
-                        "interpretation_note": "absence is not proof that the course was not offered",
-                    })
+                    writer.writerow(
+                        {
+                            "school_code": school,
+                            "school_name": metadata.get("school_name", ""),
+                            "region": metadata.get("region_sido") or metadata.get("region", ""),
+                            "district": metadata.get("region_sgg") or metadata.get("district", ""),
+                            "school_type": metadata.get("high_school_type")
+                            or metadata.get("school_type", ""),
+                            "curriculum": curriculum,
+                            "subject": subject,
+                            "coverage_status": status,
+                            "found_documents": len(direct),
+                            "ambiguous_curriculum_documents": len(ambiguous),
+                            "explicit_subject_documents": len(explicit),
+                            "explicit_subject_incomplete": incomplete,
+                            "school_extracted_ok": school_status.get("ok", 0),
+                            "school_extracted_short": school_status.get("short", 0),
+                            "school_extracted_failed": school_status.get("failed", 0),
+                            "interpretation_note": (
+                                "absence is not proof that the course was not offered"
+                            ),
+                        }
+                    )
 
     by_subject: dict[str, object] = {}
     for curriculum, subjects in SUBJECTS.items():
         for subject in subjects:
             counter = subject_counts[(curriculum, subject)]
             key = f"{curriculum}:{subject}"
-            by_subject[key] = {status: counter.get(status, 0) for status in (
-                "found", "found_curriculum_ambiguous", "extraction_failed",
-                "not_found_in_collected_plans", "offering_unknown",
-            )}
-    catalog_school_count = len({school_key(row.get("source") or {}) for row in catalog_rows if school_key(row.get("source") or {})})
+            by_subject[key] = {
+                status: counter.get(status, 0)
+                for status in (
+                    "found",
+                    "found_curriculum_ambiguous",
+                    "extraction_failed",
+                    "not_found_in_collected_plans",
+                    "offering_unknown",
+                )
+            }
+    catalog_school_count = len(
+        {
+            school_key(row.get("source") or {})
+            for row in catalog_rows
+            if school_key(row.get("source") or {})
+        }
+    )
     summary = {
         "unit_of_analysis": {
             "catalog": "one source document x detected math subject",
             "coverage": "one school x curriculum x math subject",
         },
         "school_roster_rows": len(schools),
-        "source_index_rows": sum(school_source_status[school].total() for school in school_source_status),
+        "source_index_rows": sum(
+            school_source_status[school].total() for school in school_source_status
+        ),
         "catalog_rows": len(catalog_rows),
         "catalog_schools": catalog_school_count,
         "coverage_rows": len(schools) * sum(len(values) for values in SUBJECTS.values()),
@@ -321,11 +426,19 @@ def main() -> None:
     os.replace(catalog_temp, args.catalog_output)
     os.replace(coverage_temp, args.coverage_output)
     os.replace(summary_temp, args.summary_output)
-    print(json.dumps({
-        "schools": len(schools), "source_rows": summary["source_index_rows"],
-        "catalog_rows": len(catalog_rows), "catalog_schools": catalog_school_count,
-        "coverage_rows": summary["coverage_rows"], "coverage_status": dict(status_counts),
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "schools": len(schools),
+                "source_rows": summary["source_index_rows"],
+                "catalog_rows": len(catalog_rows),
+                "catalog_schools": catalog_school_count,
+                "coverage_rows": summary["coverage_rows"],
+                "coverage_status": dict(status_counts),
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

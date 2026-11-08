@@ -2,6 +2,7 @@
 
 import Link from "../../SiteLink";
 import MathText from "../../MathText";
+import CasePeriod from "../CasePeriod";
 import SourceDocumentHtml from "../../SourceDocumentHtml";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -100,7 +101,7 @@ export default function CaseDetailViewer({
       <header className="sourceDetailHeader">
         <div>
           <p className="breadcrumb"><Link href="/cases">수행평가 라이브러리</Link><span>/</span>원문 상세</p>
-          <div className="caseBadges"><span>{caseItem.curriculum === "shared" ? "교육과정 유보" : `${caseItem.curriculum} 개정`}</span><span>{caseItem.subject}</span><span>{caseItem.region || "지역 미확인"}</span></div>
+          <div className="caseBadges"><span>{caseItem.curriculum === "shared" ? "교육과정 유보" : `${caseItem.curriculum} 개정`}</span><span>{caseItem.subject}</span><CasePeriod years={caseItem.academic_years} semesters={caseItem.semesters} /><span>{caseItem.region || "지역 미확인"}</span></div>
           <h1>{caseItem.school_name}</h1>
           <p>{caseItem.source_name}</p>
         </div>
@@ -111,8 +112,8 @@ export default function CaseDetailViewer({
       </header>
 
       <section className="sourceTrustNotice" aria-label="원문 표시 원칙">
-        <strong>원문 텍스트와 표 구조를 안전 변환한 재현본입니다.</strong>
-        <p>표의 문구와 구조를 보존하려 했지만 지면 배치·도형·병합 셀 모양은 달라질 수 있습니다. 최종 인용 전 학교알리미 원문과 대조하고, 항목 경계가 확실하지 않은 문서는 ‘재검토 묶음’ 표시를 확인해 주세요.</p>
+        <strong>{selectedItem?.source_previews?.length ? "원문 그림과 추출 표를 함께 제공합니다." : "원문 텍스트와 표 구조를 안전 변환한 재현본입니다."}</strong>
+        <p>{selectedItem?.source_previews?.length ? "수식과 병합 모양은 원문 그림에서 확인하고, 텍스트는 ‘추출 표 함께 보기’에서 읽을 수 있습니다. 원문 페이지 전체를 보여 주는 경우에는 같은 페이지의 다른 평가나 안내가 함께 보일 수 있습니다." : "표의 문구와 구조를 보존하려 했지만 지면 배치·도형·병합 셀 모양은 달라질 수 있습니다. 최종 인용 전 학교알리미 원문과 대조하고, 항목 경계가 확실하지 않은 문서는 ‘재검토 묶음’ 표시를 확인해 주세요."}</p>
         <span className={detail.extraction_status === "bounded" ? "confirmed" : "review"}>{detail.extraction_status === "bounded" ? "개별 수행평가 경계 확인" : "원문 구간 묶음 · 경계 재검토"}</span>
       </section>
 
@@ -137,21 +138,22 @@ export default function CaseDetailViewer({
         </aside>
 
         <article className="assessmentSourcePaper">
+          {selectedItem?.source_notes?.length ? <section className="sourceTrustNotice" aria-label="원문 확인 메모"><strong>원문 확인 메모</strong>{selectedItem.source_notes.map((note) => <p key={note}>{note}</p>)}</section> : null}
           {selectedSummary ? <SourceFacts item={selectedItem || selectedSummary} detectedTitles={detail.detected_titles} /> : null}
           {!selectedItem ? <p className="compactLoading">선택한 원문 표를 불러오고 있습니다.</p> : null}
           {selectedItem ? (
             <>
-              <div className="sourcePaperTopline"><div><span>원문 추출 표</span><h2>{selectedItem.title === "수행평가 원문 구간" && detail.detected_titles.length === 1 ? detail.detected_titles[0] : selectedItem.title === "수행평가 원문 구간" && detail.detected_titles.length > 1 ? `수행평가명 ${detail.detected_titles.length}개 확인 · 원문 묶음` : selectedItem.title}</h2></div><small>{selectedItem.title_basis === "heading" ? "원문 제목에서 분리" : selectedItem.title_basis === "table" ? "원문 표의 평가명" : "평가명 확인 · 원문 경계 묶음"}</small></div>
+              <div className="sourcePaperTopline"><div><span>{selectedItem.source_previews?.length ? "원문 표" : "원문 추출 표"}</span><h2>{selectedItem.title === "수행평가 원문 구간" && detail.detected_titles.length === 1 ? detail.detected_titles[0] : selectedItem.title === "수행평가 원문 구간" && detail.detected_titles.length > 1 ? `수행평가명 ${detail.detected_titles.length}개 확인 · 원문 묶음` : selectedItem.title}</h2></div><small>{selectedItem.title_basis === "heading" ? "원문 제목에서 분리" : selectedItem.title_basis === "table" ? "원문 표의 평가명" : "평가명 확인 · 원문 경계 묶음"}</small></div>
               {selectedItem.source_available === false ? (
                 <div className="sourceMismatchNotice" role="status"><strong>이 구간은 공개 전 추가 확인이 필요합니다.</strong><p>{selectedItem.extraction_status === "source_mismatch_review" ? "수학 과목 원문 경계를 확인하지 못해 내용을 숨겼습니다." : "여러 평가 구간이 묶여 있어 항목 경계와 개인정보 안전 검토를 마칠 때까지 표 재현본을 공개하지 않습니다."} 학교알리미 원문에서 확인해 주세요.</p></div>
-              ) : <SourceDocumentHtml html={selectedItem.source_html} />}
+              ) : <SourceDocumentHtml html={selectedItem.source_html} previews={selectedItem.source_previews} coveredTableKeys={selectedItem.source_preview_table_keys} coveredExcerpt={selectedItem.source_excerpt_covered} />}
               {selectedItem.source_available !== false && selectedItem.rubric_html ? (
                 <section className="sourceRubric" aria-labelledby="source-rubric-title">
                   <header>
-                    <div><span>채점 기준 원문</span><h3 id="source-rubric-title">루브릭·평가기준 표만 다시 보기</h3></div>
-                    <p>위 수행평가 원문에 포함된 표를 찾기 쉽게 그대로 다시 표시합니다.</p>
+                    <div><span>채점 기준 원문</span><h3 id="source-rubric-title">루브릭·평가기준 원문 다시 보기</h3></div>
+                    <p>채점기준이 확인된 원문 구간을 다시 표시합니다. 같은 페이지의 평가 개요와 안내가 함께 보일 수 있습니다.</p>
                   </header>
-                  <SourceDocumentHtml html={selectedItem.rubric_html} />
+                  <SourceDocumentHtml html={selectedItem.rubric_html} previews={selectedItem.rubric_previews} coveredTableKeys={selectedItem.rubric_preview_table_keys} coveredExcerpt={selectedItem.rubric_excerpt_covered} />
                 </section>
               ) : null}
             </>

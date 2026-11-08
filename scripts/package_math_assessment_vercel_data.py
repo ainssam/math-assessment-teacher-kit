@@ -199,6 +199,24 @@ def package_catalog(
                 ON assessment_item_rankings(category, priority_score DESC, item_id);
             """
         )
+        has_design_index = destination.execute(
+            "SELECT count(*) FROM source.sqlite_schema WHERE type='table' AND name IN ('design_index_items','design_index_tags')"
+        ).fetchone()[0]
+        if has_design_index == 2:
+            destination.executescript("""
+                CREATE TABLE design_index_items AS
+                    SELECT d.item_id FROM source.design_index_items d
+                    JOIN main.assessment_items item ON item.item_id=d.item_id
+                    WHERE item.extraction_status='bounded' AND item.title_basis IN ('table','heading');
+                CREATE UNIQUE INDEX design_index_item ON design_index_items(item_id);
+                CREATE TABLE design_index_tags AS
+                    SELECT t.item_id,t.axis,t.tag,t.source_field,t.evidence FROM source.design_index_tags t
+                    JOIN main.design_index_items d ON d.item_id=t.item_id;
+                CREATE UNIQUE INDEX design_index_lookup ON design_index_tags(item_id,axis,tag);
+                CREATE INDEX design_index_facet ON design_index_tags(axis,tag,item_id);
+            """)
+        elif has_design_index:
+            raise ValueError("Incomplete assessment design index")
         destination.execute("DETACH DATABASE source")
         destination.execute("VACUUM")
 

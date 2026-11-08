@@ -18,7 +18,25 @@ UNSAFE_BLOCK_RE = re.compile(
     r"<(script|style|iframe|object)\b.*?</\1\s*>",
     flags=re.IGNORECASE | re.DOTALL,
 )
-TABLE_RE = re.compile(r"<table\b.*?</table\s*>", flags=re.IGNORECASE | re.DOTALL)
+TABLE_TAG_RE = re.compile(r"</?table\b[^>]*>", flags=re.IGNORECASE)
+
+
+def _table_fragments(value: str) -> list[str]:
+    """Respect nested tables instead of stopping at the first inner close tag."""
+    depth = 0
+    start = 0
+    fragments = []
+    for match in TABLE_TAG_RE.finditer(value):
+        if match.group().startswith("</"):
+            if depth:
+                depth -= 1
+                if depth == 0:
+                    fragments.append(value[start : match.end()])
+        else:
+            if depth == 0:
+                start = match.start()
+            depth += 1
+    return fragments
 
 
 class _SafeTableParser(HTMLParser):
@@ -105,8 +123,7 @@ def rubric_tables_from_source_html(value: str) -> str:
     """Return only source tables that visibly contain criteria and scoring fields."""
 
     rubric_tables: list[str] = []
-    for match in TABLE_RE.finditer(value):
-        table = match.group(0)
+    for table in _table_fragments(value):
         visible = re.sub(r"<[^>]+>", " ", html.unescape(table))
         visible = re.sub(r"\s+", " ", visible)
         has_criteria = re.search(
@@ -117,3 +134,31 @@ def rubric_tables_from_source_html(value: str) -> str:
         if has_criteria and has_scale:
             rubric_tables.append(_safe_table(table))
     return "\n".join(rubric_tables)
+
+
+def repair_truncated_nested_rubric(rubric: str, source: str) -> str:
+    """Restore an exact legacy prefix from the complete table in this item.
+
+    Only nested-table excerpts that are a strict text prefix of exactly one
+    complete source rubric qualify. An intentionally separate rubric stays as is.
+    """
+
+    def compact_text(value: str) -> str:
+        return re.sub(r"\s+", "", html.unescape(re.sub(r"<[^>]+>", "", value)))
+
+    candidates = _table_fragments(rubric_tables_from_source_html(source))
+    output = rubric
+    for table in _table_fragments(rubric):
+        if len(re.findall(r"<table\b", table, re.I)) < 2:
+            continue
+        text = compact_text(table)
+        if len(text) < 40:
+            continue
+        matches = [
+            candidate
+            for candidate in candidates
+            if compact_text(candidate).startswith(text) and len(compact_text(candidate)) > len(text)
+        ]
+        if len(matches) == 1:
+            output = output.replace(table, matches[0], 1)
+    return output

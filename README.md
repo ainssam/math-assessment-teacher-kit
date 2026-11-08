@@ -2,6 +2,32 @@
 
 다른 학교의 수행평가 계획을 읽고, 우리 수업에 맞는 과제와 채점기준을 설계하는 데 쓰는 교사용 웹앱입니다. 과목별 사례 검색, 원문 표 보기, 사례 비교에 쓰인 웹·API 코드와 학교알리미 4-가 자료 처리 방법을 함께 공개합니다. [운영 중인 아카이브](https://suhaeng-math.vercel.app/cases)
 
+[이번 업데이트 상세 내역](docs/UPDATE_REPORT_2026_SECOND_SEMESTER.md) · [2026학년도 자료 범위와 검증 기준](docs/SCHOOLINFO_2026_DATA_INDEX.md)
+
+## 내 AI에게 자료 조사를 부탁하기
+
+앱을 직접 설치하지 않아도 공개 아카이브를 조회할 수 있습니다. **원격 MCP를 지원하는 개인 AI 도구**에 아래 주소를 연결하면 자료 범위 확인, 학년도·학기·과목·지역 검색, 과제 상세, 공식 성취기준, 2~4개 과제 비교, 검증된 원문 그림 조회를 사용할 수 있습니다.
+
+```text
+https://suhaeng-math.vercel.app/api/mcp
+```
+
+인증 방식은 **없음 / No authentication**, 전송 방식은 **Streamable HTTP**입니다. 개인 AI 로그인이나 구독 정보는 이 서버에 입력하지 않습니다. AI는 자신의 계정에서 답변을 작성하고 MCP는 공개 근거를 읽어 전달합니다. 각 AI 서비스의 기능 제공 범위와 사용 한도가 적용됩니다. [MCP 연결 방법과 문제 해결](docs/MCP_CONNECTION.md)
+
+Codex CLI에서는 다음과 같이 연결할 수 있습니다.
+
+```powershell
+codex mcp add suhaeng-math --url https://suhaeng-math.vercel.app/api/mcp
+```
+
+연결한 뒤 이렇게 요청해 보세요.
+
+> 수학 수행평가 MCP로 2026학년도 2학기, 2022 개정 기하 사례를 최대5개 찾아줘. 그중 두 과제의 실제 수행 내용과 채점표를 읽어 비교하고, 학교·학기·공식 출처를 붙여줘. 검색 일치 수와 실제로 읽은 수를 구분하고, 원문 확인 메모도 알려줘. 수식이 이상하면 원문 그림을 확인해줘.
+
+MCP 연결을 지원하지 않으면 **Python만으로 실행하는 공개 조회 도구**를 사용할 수 있습니다. 저장소의 `research` 폴더를 Codex로 열어 질문하거나, 명령 결과를 AI에 첨부하면 됩니다. [개인 AI 연구 안내·명령 예시](docs/AI_RESEARCH_GUIDE.md) · [시작 질문8개](research/prompts/)
+
+이 저장소를 AI에게 읽히는 것만으로 운영 자료가 자동 검색되지는 않습니다. MCP 또는 조회 도구를 실제로 실행해야 최신 자료를 확인할 수 있습니다. 두 경로 모두 자료 수정·학생 평가·자동 게시 기능은 없으며, 교사가 원문을 대조하고 수업 조건에 맞게 판단합니다.
+
 ## 처음 실행하기
 
 Node.js 24 이상, pnpm 11, Python 3.12 이상이 필요합니다. 아래 예시는 Windows PowerShell 기준입니다. GitHub에서 **Code → Download ZIP**으로 받은 경우에는 압축을 풀고 그 폴더에서 `pnpm install`부터 실행하면 됩니다.

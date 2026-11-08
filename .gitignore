@@ -39,3 +39,10 @@ data/roster.csv
 *.partial
 services/math-assessment-api/data/
 .env.local
+
+# Personal AI research results
+research/outputs/
+
+# Runtime originals and their binding registry are managed outside this repo.
+apps/math-assessment-web/public/source-tables/
+services/math-assessment-api/app/math_table_previews.json

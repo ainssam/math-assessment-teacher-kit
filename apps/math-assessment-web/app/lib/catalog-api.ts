@@ -146,6 +146,60 @@ export type CaseDetailResponse = {
   items: AssessmentItemSummary[];
 };
 
+export type DesignTag = {
+  axis: "topic" | "method" | "artifact";
+  tag: string;
+  source_field: "title" | "overview" | "method" | "standard";
+  evidence: string;
+};
+
+export type AchievementStandard = {
+  curriculum: string;
+  key: string;
+  code: string;
+  subject: string;
+  text: string;
+  count: number;
+};
+
+export type StandardReferenceItem = Pick<AssessmentItemSummary,
+  "item_id" | "title" | "overview" | "method" | "standards" | "has_rubric"> & {
+  case_id: string;
+  school_name: string;
+  region: string;
+  academic_years: number[];
+  semesters: number[];
+};
+
+export type StandardReferenceResponse = {
+  curriculum: string;
+  subject: string;
+  standard: AchievementStandard | null;
+  standards: AchievementStandard[];
+  total: number;
+  source_url: string;
+  items: StandardReferenceItem[];
+};
+
+export type DesignReferenceResponse = {
+  available: boolean;
+  indexed_items: number;
+  total: number;
+  topics: Record<string, number>;
+  methods: Record<string, number>;
+  items: Array<{
+    item_id: string;
+    case_id: string;
+    title: string;
+    school_name: string;
+    region: string;
+    has_rubric: boolean;
+    tags: DesignTag[];
+  }>;
+};
+
+export type SourceTablePreview = { url: string; page: number; width: number; height: number; page_context?: boolean; rendered_from_hangul?: boolean };
+
 export type AssessmentItemDetail = AssessmentItemSummary & {
   case_id: string;
   curriculum: Curriculum;
@@ -157,6 +211,13 @@ export type AssessmentItemDetail = AssessmentItemSummary & {
   source_url: string;
   source_html: string;
   rubric_html: string;
+  source_previews?: SourceTablePreview[];
+  rubric_previews?: SourceTablePreview[];
+  source_preview_table_keys?: string[];
+  rubric_preview_table_keys?: string[];
+  source_excerpt_covered?: boolean;
+  rubric_excerpt_covered?: boolean;
+  source_notes?: string[];
 };
 
 export type FacetResponse = {

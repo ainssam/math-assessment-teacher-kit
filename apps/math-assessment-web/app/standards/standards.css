@@ -1,0 +1,62 @@
+.standardExplorer { padding-top: 2rem; }
+.standardControls { margin-top: 1.5rem; padding: 1.25rem; background: var(--surface-subtle); border: 1px solid var(--line); border-radius: 12px; }
+.standardSelects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.standardSelects label { min-width: 0; display: grid; gap: 0.35rem; font-weight: 700; }
+.standardSelects select { width: 100%; min-height: 44px; padding: 0.5rem; background: white; color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; }
+.standardCodeSelect { grid-column: 1 / -1; }
+.standardStatement { display: grid; gap: 0.6rem; margin-top: 1rem; padding: 1rem 0; line-height: 1.7; }
+.standardStatement > strong { color: var(--forest-dark); }
+.standardStatement p { margin: 0; }
+.standardStatement a, .comparisonSources article > header a { color: var(--forest-dark); text-underline-offset: 0.2em; font-size: 0.88rem; }
+.standardSelection { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 1.4rem 0; padding: 1rem 0; border-block: 1px solid var(--line-strong); }
+.standardSelection p { margin: 0.3rem 0 0; color: var(--muted); }
+.standardSelection ul { margin: 0.3rem 0 0; padding: 0; list-style: none; }
+.standardSelection li { display: flex; align-items: baseline; gap: 0.8rem; font-size: 0.9rem; }
+.standardSelection button:not(.primaryAction) { min-height: 44px; border: 0; background: transparent; color: var(--forest-dark); font: inherit; text-decoration: underline; cursor: pointer; flex-shrink: 0; }
+.standardSelection .primaryAction { flex-shrink: 0; font: inherit; font-weight: 700; }
+.standardSelection .primaryAction:disabled { color: var(--muted) !important; background: var(--surface-subtle) !important; border: 1px solid var(--line); border-color: var(--line) !important; cursor: default; }
+.standardResults { margin: 0; padding: 0; list-style: none; }
+.standardResults > li { display: flex; align-items: flex-start; gap: 1.5rem; justify-content: space-between; padding: 1.25rem 0; border-bottom: 1px solid var(--line); }
+.standardResultMain { min-width: 0; flex: 1; }
+.standardResultMain h3 { margin: 0.4rem 0 0; font: 750 1.1rem/1.5 var(--font-body); }
+.standardResultMain h3 a { color: var(--forest-dark); text-underline-offset: 0.2em; }
+.standardResultMain p { margin: 0.3rem 0 0.6rem; color: var(--muted); font-size: 0.9rem; }
+.standardResultMain dl { margin: 0; font-size: 0.93rem; }
+.standardResultMain dl div { display: grid; grid-template-columns: 5rem 1fr; gap: 0.5rem; margin-top: 0.35rem; }
+.standardResultMain dt { color: var(--muted); }
+.standardResultMain dd { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
+.standardPick { min-height: 44px; display: flex; gap: 0.45rem; align-items: center; font-weight: 700; flex-shrink: 0; cursor: pointer; }
+.standardPick input { width: 1.1rem; height: 1.1rem; accent-color: var(--forest); }
+.standardPick:has(input:disabled) { color: var(--muted); cursor: default; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.comparisonReadGuide { color: var(--muted); }
+.comparisonSources article { position: relative; }
+.comparisonEvidence, .comparisonRubric, .comparisonFullSource { padding: 1rem; }
+.comparisonEvidence h4, .comparisonRubric h4 { margin: 0 0 0.5rem; }
+.comparisonEvidence h4:not(:first-child) { margin-top: 1rem; }
+.comparisonSources .comparisonEvidence p { font-size: 0.94rem; }
+.comparisonEvidence { white-space: pre-line; }
+.comparisonTable thead button { min-height: 44px; color: var(--forest-dark); font-size: 0.86rem; text-decoration: underline; }
+.comparisonRubric { border-top: 1px solid var(--line); }
+.comparisonFullSource summary { min-height: 44px; padding: 0.5rem 0; color: var(--forest-dark); font-weight: 700; cursor: pointer; }
+.sourceOriginalTables { position: relative; overflow: auto; }
+.sourceExtractionNotice { margin: 0; padding: 0.85rem 1rem; color: var(--ink); background: var(--surface-subtle); border-bottom: 1px solid var(--line); font-size: 0.9rem; line-height: 1.65; }
+.sourceOriginalTables figure { margin: 0 0 1.5rem; }
+.sourceOriginalTableImage { display: block; width: 100%; min-width: 660px; max-width: 1100px; height: auto; border: 1px solid var(--line); }
+.sourceOriginalTables figcaption { margin-top: 0.45rem; color: var(--muted); font-size: 0.86rem; }
+.sourceExtractedTables { margin-top: 1rem; border-top: 1px solid var(--line); }
+.sourceExtractedTables summary { min-height: 44px; padding-block: 0.65rem; cursor: pointer; color: var(--forest-dark); font-weight: 700; }
+.sourceExtractedTables > .sourceDocumentHtml { padding-inline: 0; }
+.sourceDocumentViewer.isWide .sourceOriginalTableImage { width: max(100%, 980px); max-width: none; }
+.sourceDocumentViewer.isLargeText .sourceOriginalTableImage { width: max(100%, 1200px); max-width: none; }
+@media print {
+  .sourceOriginalTables { overflow: visible; }
+  .sourceDocumentViewer .sourceOriginalTableImage { width: 100%; min-width: 0; max-width: 100%; height: auto; }
+  .sourceOriginalTables figure { break-inside: avoid; }
+}
+@media (max-width: 700px) {
+  .standardSelection { align-items: stretch; flex-direction: column; }
+  .standardResults > li { flex-direction: column; gap: 0.5rem; }
+  .standardSelects { grid-template-columns: 1fr; gap: 0.75rem; }
+  .standardResultMain dl div { grid-template-columns: 1fr; gap: 0.1rem; }
+}

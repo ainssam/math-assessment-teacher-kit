@@ -7,8 +7,8 @@ export const metadata: Metadata = {
 };
 
 const workflow = [
-  { number: "01", title: "유형별 설계 참고로 시작", description: "여섯 유형 안에서 원문 표 제목, 성취기준, 평가 방법·배점, 루브릭이 함께 확인된 사례를 우선순위대로 봅니다.", href: "/references", link: "유형별 설계 참고 열기" },
-  { number: "02", title: "전체 라이브러리에서 조건 찾기", description: "교육과정, 수학 과목, 시·도, 시·군·구, 수행 방식과 검색어로 전체 사례를 좁힙니다. 이곳은 우수 사례만 모은 화면이 아닙니다.", href: "/cases", link: "전체 라이브러리 열기" },
+  { number: "01", title: "유형별 설계 참고로 시작", description: "2학기 미적분Ⅰ에서 주제와 방법을 조합해 수행평가를 찾아봅니다. 다른 과목은 전 과목 설계 유형에서 살펴볼 수 있습니다.", href: "/references", link: "유형별 설계 참고 열기" },
+  { number: "02", title: "전체 라이브러리에서 조건 찾기", description: "학기, 교육과정, 수학 과목, 시·도, 시·군·구, 수행 방식과 검색어로 사례를 좁힙니다.", href: "/cases", link: "전체 라이브러리 열기" },
   { number: "03", title: "원문 표와 루브릭 확인", description: "사례를 열어 수행평가 내용, 반영 비율, 성취기준, 평가 방법과 채점 기준을 웹앱 안의 원문 표에서 확인합니다.", href: "/cases", link: "수행평가 원문 보기" },
   { number: "04", title: "필요할 때만 비교·검토 사용", description: "원문 비교는 선택한 최대 네 항목의 원문 표를 나란히 읽는 도구입니다. 교사 검토함은 채택·수정·보류 판단과 메모를 이 브라우저에 저장하는 개인 작업 공간입니다.", href: "/compare", link: "원문 비교 열기" },
 ];
@@ -36,6 +36,8 @@ export default function GuidePage() {
       <div className="sectionLabel"><span className="stepPill">이용 순서</span><div><h2 id="guide-workflow-title">두 라이브러리와 보조 도구의 역할</h2><p>찾기·원문 확인·개인 판단을 서로 섞지 않도록 나눴습니다.</p></div></div>
       <ol>{workflow.map((step) => <li key={step.number}><span>{step.number}</span><div><h3>{step.title}</h3><p>{step.description}</p><Link href={step.href}>{step.link} →</Link></div></li>)}</ol>
     </section>
+
+    <section className="guideHelp" aria-labelledby="standard-guide-title"><div><h2 id="standard-guide-title">같은 성취기준을 평가하는 두 과제 비교</h2><p>2015·2022 개정 전체 수학 과목에서 교육과정, 과목, 성취기준을 고르고 두 과제를 선택하세요. 비교 화면에서 수행 내용과 채점기준을 나란히 읽을 수 있습니다.</p></div><Link href="/standards">성취기준으로 비교하기 →</Link></section>
 
     <section className="guideStatuses" aria-labelledby="guide-status-title">
       <div className="sectionLabel"><span className="stepPill">원문 상태</span><div><h2 id="guide-status-title">평가영역명은 확인 상태와 함께 보세요.</h2><p>원문 경계가 불명확할 때는 그럴듯한 이름을 새로 만들지 않습니다.</p></div></div>

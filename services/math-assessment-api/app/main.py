@@ -2,10 +2,12 @@
 
 import json
 import os
-from typing import Annotated, Final
+from typing import Annotated, Final, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, Response
 
+from app.mcp_server import http as mcp_http_app
+from app.mcp_server import mcp_lifespan
 from app.repository import CatalogRepository
 from app.request_guard import client_key, limiter
 from app.schemas import (
@@ -14,10 +16,12 @@ from app.schemas import (
     CaseItem,
     CaseListResponse,
     CuratedCaseListResponse,
+    DesignReferenceResponse,
     FacetResponse,
     OfficialSourceRegistry,
     ProductMetadata,
     ReferencePageResponse,
+    StandardReferenceResponse,
     SubjectListResponse,
     TrendListResponse,
     VisitorCountResponse,
@@ -27,6 +31,7 @@ from app.settings import (
     detail_catalog_database_path,
     official_source_registry_path,
 )
+from app.standard_catalog import REGISTRIES
 from app.visitor_counter import visitor_counts
 
 SERVICE_NAME: Final = "math-assessment-api"
@@ -39,6 +44,7 @@ app = FastAPI(
     title="2026 수학 수행평가 아이디어 아카이브 API",
     description="전국 수행평가 경향 탐색과 교사 설계를 지원하는 근거 기반 API",
     version=SERVICE_VERSION,
+    lifespan=mcp_lifespan,
     # Interactive API docs are useful in local review, but do not need to be a
     # public discovery surface in the production teacher service.
     docs_url=None if os.environ.get("VERCEL") else "/api/docs",
@@ -51,10 +57,17 @@ app = FastAPI(
 async def add_security_headers(request: Request, call_next) -> Response:
     """API 응답이 브라우저에서 문서나 프레임으로 오용되지 않도록 제한한다."""
     path = request.url.path
-    if path.startswith("/api/v1/"):
-        if path.endswith("/detail") or "/assessment-items/" in path:
+    if path.startswith("/api/v1/") or path.rstrip("/") == "/api/mcp":
+        if path.rstrip("/") == "/api/mcp":
+            limit = 70
+        elif path.endswith("/detail") or "/assessment-items/" in path:
             limit = 40
-        elif path in {"/api/v1/cases", "/api/v1/references"}:
+        elif path in {
+            "/api/v1/cases",
+            "/api/v1/references",
+            "/api/v1/design-references",
+            "/api/v1/standard-references",
+        }:
             limit = 70
         elif path == "/api/v1/visitors":
             limit = 12
@@ -203,12 +216,14 @@ def trends(
 
 @app.get("/api/v1/cases", response_model=CaseListResponse, tags=["catalog"])
 def cases(
-    curriculum: Annotated[str | None, Query(pattern="^(2015|2022)$")] = None,
+    curriculum: Annotated[str | None, Query(pattern="^(2015|2022|shared)$")] = None,
     subject: Annotated[str | None, Query(min_length=1, max_length=40)] = None,
     tag: Annotated[str | None, Query(min_length=1, max_length=40)] = None,
     region: Annotated[str | None, Query(min_length=1, max_length=40)] = None,
     district: Annotated[str | None, Query(min_length=1, max_length=40)] = None,
     query: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    semester: Annotated[Literal["1", "2", "unknown"] | None, Query()] = None,
+    academic_year: Annotated[int | None, Query(ge=2000, le=2099)] = None,
     include_ambiguous: bool = True,
     limit: Annotated[int, Query(ge=1, le=30)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -225,6 +240,8 @@ def cases(
         include_ambiguous=include_ambiguous,
         limit=limit,
         offset=offset,
+        semester=semester,
+        academic_year=academic_year,
     )
     return {
         "items": items,
@@ -322,11 +339,42 @@ def references(
 
 @app.get("/api/v1/facets", response_model=FacetResponse, tags=["catalog"])
 def facets(
-    curriculum: Annotated[str | None, Query(pattern="^(2015|2022)$")] = None,
+    curriculum: Annotated[str | None, Query(pattern="^(2015|2022|shared)$")] = None,
     subject: Annotated[str | None, Query(min_length=1, max_length=40)] = None,
     region: Annotated[str | None, Query(min_length=1, max_length=40)] = None,
+    semester: Annotated[Literal["1", "2", "unknown"] | None, Query()] = None,
+    academic_year: Annotated[int | None, Query(ge=2000, le=2099)] = None,
 ) -> dict[str, object]:
-    return ready_repository().facets(curriculum, subject, region)
+    return ready_repository().facets(curriculum, subject, region, semester, academic_year)
+
+
+@app.get("/api/v1/design-references", response_model=DesignReferenceResponse, tags=["catalog"])
+def design_references(
+    topic: Annotated[str, Query(max_length=24, pattern=r"^[a-z-]*$")] = "",
+    method: Annotated[str, Query(max_length=24, pattern=r"^[a-z-]*$")] = "",
+    limit: Annotated[int, Query(ge=1, le=30)] = 12,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
+) -> dict[str, object]:
+    return ready_repository().design_references(topic, method, limit, offset)
+
+
+@app.get("/api/v1/standard-references", response_model=StandardReferenceResponse, tags=["catalog"])
+def standard_references(
+    subject: Annotated[str | None, Query(max_length=40)] = None,
+    standard: Annotated[str, Query(max_length=32)] = "",
+    semester: Annotated[Literal["1", "2"] | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=30)] = 12,
+    offset: Annotated[int, Query(ge=0, le=30_000)] = 0,
+    curriculum: Annotated[Literal["2015", "2022"], Query()] = "2022",
+) -> dict[str, object]:
+    subject = subject or ("미적분Ⅰ" if curriculum == "2022" else "수학")
+    if subject not in REGISTRIES[curriculum]["subjects"]:
+        raise HTTPException(
+            status_code=422, detail="선택한 교육과정에 해당하는 수학 과목을 골라 주세요."
+        )
+    return ready_repository().standard_references(
+        subject, standard, semester, limit, offset, curriculum
+    )
 
 
 @app.get("/api/v1/cases/{case_id}", response_model=CaseItem, tags=["catalog"])
@@ -363,3 +411,7 @@ def assessment_item(
     if item is None:
         raise HTTPException(status_code=404, detail="수행평가 항목을 찾을 수 없습니다.")
     return item
+
+
+# Keep the SDK transport after all REST routes so /api/v1 remains unchanged.
+app.mount("/api", mcp_http_app)

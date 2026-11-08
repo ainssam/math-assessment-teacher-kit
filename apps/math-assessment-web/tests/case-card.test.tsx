@@ -50,6 +50,7 @@ describe("사례 카드", () => {
   it("한 학교·과목에서 확인한 수행평가명을 대표 하나로 숨기지 않는다", () => {
     render(<table><tbody><CaseTableRow item={baseCase} /></tbody></table>);
     expect(screen.getByText("확인된 수행평가 2개")).not.toBeNull();
+    expect(screen.getByText("2026학년도 1학기")).toBeVisible();
     expect(screen.getByText("미분과 적분을 활용한 문제 만들기")).not.toBeNull();
     expect(screen.getByText("극한 그래프 시각화")).not.toBeNull();
   });

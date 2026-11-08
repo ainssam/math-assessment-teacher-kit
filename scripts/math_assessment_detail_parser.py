@@ -58,7 +58,7 @@ GENERIC_TITLE_RE = re.compile(
     r"결시자.*|미응시자.*|학적\s*변동.*|성적\s*처리.*|평가\s*결과.*)$"
 )
 EXPLICIT_TITLE_LABEL_RE = re.compile(
-    r"^(?:평가영역(?:명|[1-9])?|수행평가(?:명|영역|과제명)|수행과제(?:명)?|평가과제명|과제명)$"
+    r"^(?:평가영역명?|수행평가(?:명|영역|과제명)|수행과제명?|평가과제명|과제명)(?:[1-9]\d*)?$"
 )
 TITLE_VALUE_STOP_LABELS = {
     "영역만점",
@@ -113,7 +113,12 @@ STRUCTURAL_HEADING_RE = re.compile(
     r"평가의?\s*종류와\s*반영\s*비율|시행\s*계획|영역별\s*세부\s*계획|"
     r"수행평가\s*성취기준)$"
 )
-STRUCTURAL_EXACT_COMPACT = {
+BARE_NON_TASK_LABELS = {
+    "유형", "주체", "방식", "평가유형", "수행과제", "만점", "점수",
+    "교육과정", "성취코드", "수행평가영역", "지필평가",
+}
+STRUCTURAL_EXACT_COMPACT = BARE_NON_TASK_LABELS | {
+    "성취기준별성취수준",
     "항목별계획",
     "평가영역",
     "평가요소별세부채점기준",
@@ -266,7 +271,11 @@ def subject_code_key(value: str) -> str:
 def subjects_for_standard_codes(codes: list[str]) -> set[str]:
     """Map codes to subjects using only the most specific matching prefix."""
 
-    return {subject for raw_code in codes for subject in _standard_code_subjects(subject_code_key(raw_code))}
+    return {
+        subject
+        for raw_code in codes
+        for subject in _standard_code_subjects(subject_code_key(raw_code))
+    }
 
 
 _NORMALIZED_STANDARD_PREFIXES = tuple(
@@ -276,7 +285,11 @@ _NORMALIZED_STANDARD_PREFIXES = tuple(
 
 
 def _standard_code_subjects(code: str) -> set[str]:
-    matches = [(len(prefix), subject) for prefix, subject in _NORMALIZED_STANDARD_PREFIXES if code.startswith(prefix)]
+    matches = [
+        (len(prefix), subject)
+        for prefix, subject in _NORMALIZED_STANDARD_PREFIXES
+        if code.startswith(prefix)
+    ]
     longest = max((length for length, _ in matches), default=0)
     return {subject for length, subject in matches if length == longest}
 
@@ -592,6 +605,8 @@ def _clean_heading_title(raw: str) -> tuple[str, str]:
 
 def _valid_title(title: str) -> bool:
     compact = compact_text(title)
+    if compact in BARE_NON_TASK_LABELS:
+        return False
     if not 2 <= len(compact) <= 100:
         return False
     if GENERIC_TITLE_RE.fullmatch(title) or re.fullmatch(r"[0-9점%./~\s]+", title):
@@ -608,7 +623,11 @@ def heading_title_is_structural(title: str) -> bool:
     source unless an explicit title cell confirms a real task name.
     """
 
-    clean = re.sub(r"\s+", " ", title).strip()
+    # Legacy PDF outline markers can contain C0 bytes between a number and
+    # its punctuation. They carry no title text and must not turn structural
+    # headings into independently published tasks.
+    clean = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", title)
+    clean = re.sub(r"\s+", " ", clean).strip()
     structural_clean = re.sub(r"^(?:\d+|[가-하])\s*[.)]\s*", "", clean)
     structural_clean = re.sub(r"\s*\(※[^)]*\)\s*$", "", structural_clean)
     # PDF/HWP converters frequently leave the comma from a numbered outline
@@ -619,6 +638,14 @@ def heading_title_is_structural(title: str) -> bool:
     compact = compact_text(structural_clean)
     return bool(
         compact in STRUCTURAL_EXACT_COMPACT
+        or re.match(
+            r"^(?:안내된절차에따라|학생의학습활동에대한효과를높이고|"
+            r"수행평가세부계획에의거|평가의결과는)",
+            compact,
+        )
+        or ("상담자료로활용" in compact and "평가결과기록" in compact)
+        or re.search(r"수행평가(?:의)?유의사항$", compact)
+        or re.match(r"^유의사항안내", compact)
         or STRUCTURAL_HEADING_RE.fullmatch(structural_clean)
         or re.match(
             r"^(?:교육과정\s*)?성취\s*기준\s*[:：]?\s*\[(?:10|12)",
@@ -733,13 +760,15 @@ def segment_subject_alignment(segment: str, subject: str) -> str:
     return "other" if codes else "unknown"
 
 
-def explicit_segment_title(segment: str) -> str:
+def explicit_segment_title(segment: str, *, allow_plain_task: bool = True) -> str:
     """Read an assessment name only from an explicit source-table label.
 
     The first non-empty cell after labels such as ``평가 영역명`` or
     ``수행평가명`` is source-authored evidence. Metadata cells (score, timing,
     method, and so on) terminate the search so merged tables cannot leak a
-    neighbouring field into the title.
+    neighbouring field into the title. A name/area label outranks a plain
+    ``수행과제`` activity-description field even when the latter appears first.
+    The plain field remains a fallback when a source has no usable name.
     """
 
     def clean_candidate(candidate: str) -> str:
@@ -776,6 +805,7 @@ def explicit_segment_title(segment: str) -> str:
                 return source_candidate
         return candidate
 
+    candidates: list[tuple[int, str]] = []
     for rows in _source_tables(segment):
         for row_index, row in enumerate(rows[:8]):
             values = [visible_text(cell) for cell in row]
@@ -783,6 +813,10 @@ def explicit_segment_title(segment: str) -> str:
             for index, label in enumerate(labels):
                 if not EXPLICIT_TITLE_LABEL_RE.fullmatch(label):
                     continue
+                plain_task = bool(re.fullmatch(r"수행과제(?:[1-9]\d*)?", label))
+                if plain_task and not allow_plain_task:
+                    continue
+                priority = 2 if plain_task else 0
                 # Detailed item tables usually place the title immediately to
                 # the right of the label. Stop if the next populated cell is
                 # another metadata header; that row is a column header, not a
@@ -801,7 +835,7 @@ def explicit_segment_title(segment: str) -> str:
                     ):
                         break
                     if usable(candidate):
-                        return source_spelling(candidate)
+                        candidates.append((priority, source_spelling(candidate)))
                     break
 
                 # A label/value row can contain a generic assessment area
@@ -826,7 +860,7 @@ def explicit_segment_title(segment: str) -> str:
                         seen.add(key)
                         vertical.append(candidate)
                 if len(vertical) == 1:
-                    return source_spelling(vertical[0])
+                    candidates.append((priority, source_spelling(vertical[0])))
 
         # A common rubric layout names the assessment in the first data cell
         # under an explicit '영역(만점)' header.  This differs from an ordinary
@@ -849,10 +883,11 @@ def explicit_segment_title(segment: str) -> str:
                     continue
                 candidate = clean_candidate(visible_text(following_row[0]))
                 if usable(candidate):
-                    return source_spelling(candidate)
+                    candidates.append((1, source_spelling(candidate)))
+                    break
                 if candidate:
                     break
-    return ""
+    return min(candidates, key=lambda candidate: candidate[0])[1] if candidates else ""
 
 
 def _heading_candidates(block: str) -> list[tuple[int, int, str, str]]:
@@ -937,10 +972,7 @@ PLAN_TITLE_COLUMN_LABELS = {
 
 @lru_cache(maxsize=16)
 def _table_fragments_with_spans(value: str) -> list[tuple[int, int, str]]:
-    fragments = [
-        (match.start(), match.end(), match.group(0))
-        for match in re.finditer(r"<table\b.*?</table>", value, flags=re.I | re.S)
-    ]
+    fragments = _balanced_html_table_spans(value)
     lines = _line_offsets(value)
     index = 0
     while index + 1 < len(lines):
@@ -1008,7 +1040,9 @@ def _matched_rubric_html(block: str, title: str) -> str:
                 # A rubric row can label a task with its total in parentheses.
                 # Task names mentioned in teaching notes do not identify rows.
                 row_titles = {
-                    compact_text(re.sub(r"\s*\(\s*\d+(?:\.\d+)?\s*점\s*\)\s*$", "", visible_text(value)))
+                    compact_text(
+                        re.sub(r"\s*\(\s*\d+(?:\.\d+)?\s*점\s*\)\s*$", "", visible_text(value))
+                    )
                     for value in source_row
                 }
                 if not title_key or title_key not in row_titles:
@@ -1026,6 +1060,43 @@ def _instruction_schedule_rows(rows: list[list[str]]) -> bool:
         return False
     labels = {compact_text(cell) for cell in rows[0]}
     return "수업방법" in labels and bool({"진도계획", "수업평가연계의주안점"}.intersection(labels))
+
+
+def teaching_schedule_header_evidence(segment: str) -> tuple[str, ...]:
+    """Find neighbouring timetable headers even when PDF table rows were lost.
+
+    Co-occurring words scattered across a genuine assessment are insufficient.
+    Demand a compact header cluster with course units, standards, instruction,
+    evaluation and calendar columns instead.
+    """
+    text = re.sub(r"[^0-9A-Za-z가-힣]", "", visible_text(segment))
+    evidence = []
+    for match in re.finditer("수업방법", text):
+        window = text[max(0, match.start() - 100):match.end() + 100]
+        if (
+            "성취기준" in window
+            and any(label in window for label in ("단원명", "진도계획", "주요학습요소"))
+            and any(label in window for label in ("평가방법", "수업평가연계"))
+            and any(label in window for label in ("시기", "시수", "월주", "주차"))
+        ):
+            evidence.append(window)
+    return tuple(dict.fromkeys(evidence))
+
+
+def source_is_teaching_schedule_only(segment: str) -> bool:
+    """Hold a timetable excerpt unless it also carries an identifiable plan.
+
+    This labels the extracted source boundary for review, not course offering
+    or the existence of a school assessment. Source text remains unchanged.
+    """
+    if not teaching_schedule_header_evidence(segment):
+        return False
+    text = compact_text(visible_text(segment))
+    if re.search(r"채점기준|수행수준|영역만점|평가만점|세부평가", text):
+        return False
+    if labelled_numeric_fields(segment):
+        return False
+    return True
 
 
 def _expected_code_table_items(full_text: str, subject: str) -> list[ParsedAssessmentItem]:
@@ -1080,6 +1151,7 @@ def _explicit_local_table_items(
     subject: str,
     subject_status: str,
     source_offset: int,
+    task_heading_spans: tuple[tuple[int, int], ...] = (),
 ) -> list[ParsedAssessmentItem]:
     """Recover a labelled assessment table inside a reliable course section."""
 
@@ -1123,7 +1195,16 @@ def _explicit_local_table_items(
         )
         if not strong_label or evidence_markers < 2:
             continue
-        title = explicit_segment_title(fragment)
+        # The bounded heading parser already owns these tables. A plain
+        # activity-description field must not create an extra item beside its
+        # source-authored heading; an explicit name label remains eligible.
+        title = explicit_segment_title(
+            fragment,
+            allow_plain_task=not any(
+                heading_start <= start and end <= heading_end
+                for heading_start, heading_end in task_heading_spans
+            ),
+        )
         if not title:
             continue
         display_title, _ = _clean_heading_title(title)
@@ -1189,7 +1270,10 @@ def _matrix_table_items(
             ):
                 if first != "평가방법" or any("정기시험" in label for label in row_labels[1:]):
                     category_row = row
-            if first in {"평가영역", "평가영역명", "평가내용", "수행평가명", "과제명", "횟수영역", "평가요소방법"}:
+            if first in {
+                "평가영역", "평가영역명", "평가내용", "수행평가명",
+                "과제명", "횟수영역", "평가요소방법",
+            }:
                 title_row = row
         if category_row is None or title_row is None:
             continue
@@ -1297,8 +1381,13 @@ def _hinted_table_items(
         cells = [cell for row in tables[0] for cell in row]
         # A matrix shared with written exams needs a task-specific column.
         # A matching title in the table alone cannot identify its scores or dates.
-        category_labels = ({re.sub(r"\d+$", "", compact_text(cell)) for cell in row} for row in tables[0])
-        if any("수행평가" in labels and {"정기시험", "지필평가"}.intersection(labels) for labels in category_labels):
+        category_labels = (
+            {re.sub(r"\d+$", "", compact_text(cell)) for cell in row} for row in tables[0]
+        )
+        if any(
+            "수행평가" in labels and {"정기시험", "지필평가"}.intersection(labels)
+            for labels in category_labels
+        ):
             continue
         compact_cells = [compact_text(cell) for cell in cells]
         compact_fragment = compact_text(visible_text(fragment))
@@ -1710,7 +1799,7 @@ def _first_value_after_label(
     for index, key in enumerate(keys):
         if key not in wanted:
             continue
-        for candidate, candidate_key in zip(values[index + 1 :], keys[index + 1 :]):
+        for candidate, candidate_key in zip(values[index + 1 :], keys[index + 1 :], strict=True):
             if candidate_key in ALL_FIELD_LABELS or any(
                 candidate_key in aliases for aliases in FIELD_LABELS.values()
             ):
@@ -1719,6 +1808,80 @@ def _first_value_after_label(
             if clean and len(clean) <= maximum_length:
                 return clean
     return ""
+
+
+def labelled_numeric_fields(segment: str) -> dict[str, str]:
+    """Prefer overview label/value cells over point values inside a rubric.
+
+    Bare numbers qualify for a total only beside an explicit total label, or
+    beside '점수' on the same row as the assessment timing. Multiple totals in
+    a source segment remain ambiguous instead of selecting the first score.
+    """
+    candidates: dict[str, set[str]] = {"score": set(), "weight": set()}
+    specific_weights: set[str] = set()
+    total_labels = {"만점", "영역만점", "평가만점", "총점", "영역만점반영비율", "만점반영비율"}
+    weight_labels = {"반영비율", "점수반영비율", "평가비율"}
+    number = r"\d{1,3}(?:\.\d+)?"
+    shaped = re.compile(rf"^({number})\s*점?(?:\s*\(\s*({number})\s*%\s*\))?$")
+    for rows in _source_tables(segment):
+        if _instruction_schedule_rows(rows):
+            continue
+        opening = compact_text(' '.join(str(cell) for row in rows[:8] for cell in row))
+        first_keys = {compact_text(str(cell)) for cell in rows[0]} if rows else set()
+        if (('정기시험' in opening or '지필평가' in opening) and '수행평가' in opening):
+            continue
+        if '합계' in first_keys and first_keys & {'평가유형', '평가종류', '평가구분', '평가영역'}:
+            continue
+        summary_type = any(
+            compact_text(str(cell)) in {'평가유형', '평가종류', '평가구분'}
+            for row in rows[:3] for cell in row
+        )
+        for row in rows:
+            cells = _collapse_adjacent_cells(row)
+            keys = [compact_text(cell) for cell in cells]
+            timing_row = any(key in FIELD_LABELS['timing'] for key in keys)
+            for index, (cell, key) in enumerate(zip(cells, keys, strict=True)):
+                direct = re.fullmatch(
+                    rf"\s*(?:영역\s*만점|평가\s*만점|만점|총점)\s*[:：]?\s*({number})\s*점\s*", cell
+                )
+                if direct:
+                    candidates['score'].add(direct[1] + '점')
+                score_label = key in total_labels or (key == '점수' and timing_row)
+                weight_label = key in weight_labels
+                detailed_weight = (
+                    '반영비율' in key
+                    and any(term in key for term in ('세부', '영역', '학기말', '만점'))
+                )
+                if detailed_weight and index + 1 < len(cells):
+                    value = re.search(rf'(?<![\d.])({number})\s*%', cells[index + 1])
+                    if value:
+                        specific_weights.add(value[1] + '%')
+                if weight_label and summary_type:
+                    weight_label = False
+                if not score_label and not weight_label:
+                    continue
+                if index + 1 >= len(cells):
+                    continue
+                stop = next(
+                    (j for j in range(index + 1, len(keys))
+                     if keys[j] in ALL_FIELD_LABELS | total_labels | weight_labels | {'점수'}),
+                    len(cells),
+                )
+                if stop != index + 2:
+                    continue
+                following = cells[index + 1]
+                match = shaped.fullmatch(following)
+                if score_label and match:
+                    candidates['score'].add(match[1] + '점')
+                    if match[2] and '반영비율' in key:
+                        candidates['weight'].add(match[2] + '%')
+                if weight_label:
+                    weight = re.fullmatch(rf"\s*({number})\s*%\s*", following)
+                    if weight:
+                        candidates['weight'].add(weight[1] + '%')
+    if specific_weights:
+        candidates['weight'] = specific_weights
+    return {key: next(iter(values)) for key, values in candidates.items() if len(values) == 1}
 
 
 def _exact_fields(segment: str) -> dict[str, object]:
@@ -1860,6 +2023,7 @@ def _exact_fields(segment: str) -> dict[str, object]:
     for key in ("timing", "score", "weight"):
         values = _unique_values(found[key], 5)
         unambiguous[key] = values[0] if len(values) == 1 else ""
+    unambiguous.update(labelled_numeric_fields(segment))
 
     return {
         "overview": " · ".join(unique_overview),
@@ -1986,17 +2150,38 @@ def _inline_html(value: str) -> str:
     return escaped
 
 
+def _balanced_html_table_spans(value: str) -> list[tuple[int, int, str]]:
+    depth = 0
+    start = 0
+    fragments = []
+    for match in re.finditer(r'</?table\b[^>]*>', value, flags=re.I):
+        if match.group().startswith('</'):
+            if depth:
+                depth -= 1
+                if depth == 0:
+                    fragments.append((start, match.end(), value[start:match.end()]))
+        else:
+            if depth == 0:
+                start = match.start()
+            depth += 1
+    return fragments
+
+
 def _rubric_html(segment: str) -> str:
     tables: list[str] = []
-    for match in re.finditer(r"<table\b.*?</table>", segment, flags=re.I | re.S):
-        shown = visible_text(match.group(0))
-        if re.search(r"채점\s*기준|세부\s*기준|평가\s*요소|평가\s*관점\s*및\s*배점\s*기준", shown) and re.search(
+    for _, _, table in _balanced_html_table_spans(segment):
+        shown = visible_text(table)
+        if re.search(
+            r"채점\s*기준|세부\s*기준|평가\s*요소|평가\s*관점\s*및\s*배점\s*기준", shown
+        ) and re.search(
             r"점수|배점|부여\s*점수", shown
         ):
-            tables.append(sanitize_table_html(match.group(0)))
+            tables.append(sanitize_table_html(table))
     for fragment in _markdown_pipe_table_fragments(segment):
         shown = visible_text(fragment)
-        if re.search(r"채점\s*기준|세부\s*기준|평가\s*요소|평가\s*관점\s*및\s*배점\s*기준", shown) and re.search(
+        if re.search(
+            r"채점\s*기준|세부\s*기준|평가\s*요소|평가\s*관점\s*및\s*배점\s*기준", shown
+        ) and re.search(
             r"점수|배점|부여\s*점수|척도", shown
         ):
             tables.append(markdown_fragment_to_html(fragment))
@@ -2024,11 +2209,35 @@ def parse_assessment_section(
         if block_status == "assessment_anchor"
         else []
     )
+    allow_bounded_items = bool(
+        headings
+        and len(headings) <= MAX_BOUNDED_ITEMS
+        and subject_status != "subject_heading_not_found"
+        and block_status == "assessment_anchor"
+    )
+    # assessment_block strips surrounding whitespace. Translate its heading
+    # offsets back to the unstripped course text used by local table spans.
+    raw_block = subject_markdown[block_start:block_end]
+    heading_source_offset = block_start + len(raw_block) - len(raw_block.lstrip())
+    task_heading_spans = tuple(
+        (
+            heading_source_offset + start,
+            heading_source_offset
+            + (headings[index + 1][1] if index + 1 < len(headings) else len(block)),
+        )
+        for index, (_, start, title, _) in enumerate(headings)
+        if allow_bounded_items
+        and segment_subject_alignment(
+            block[start : headings[index + 1][1] if index + 1 < len(headings) else len(block)],
+            subject,
+        ) != "other"
+    )
     local_table_items = _explicit_local_table_items(
         subject_markdown,
         subject,
         subject_status,
         subject_start,
+        task_heading_spans,
     )
     matrix_items = _matrix_table_items(
         subject_markdown,
@@ -2043,12 +2252,6 @@ def parse_assessment_section(
         subject_start,
         title_hints,
     )
-    allow_bounded_items = bool(
-        headings
-        and len(headings) <= MAX_BOUNDED_ITEMS
-        and subject_status != "subject_heading_not_found"
-        and block_status == "assessment_anchor"
-    )
     items: list[ParsedAssessmentItem] = []
     if allow_bounded_items:
         for order, (_, start, title, title_raw) in enumerate(headings, 1):
@@ -2060,11 +2263,12 @@ def parse_assessment_section(
                 subject_alignment == "other"
                 or (subject_status == "subject_mention_only" and subject_alignment == "unknown")
             )
-            # An explicit source-table label outranks every numbered heading,
-            # not only headings already classified as structural.  School
-            # plans often number a generic subsection and put the real task
-            # name in the first table row.
-            table_title = explicit_segment_title(segment)
+            # A source-authored name/area label outranks a numbered heading.
+            # A plain '수행과제' field can instead be an activity description,
+            # so use it only when the heading is structural, not a real name.
+            table_title = explicit_segment_title(
+                segment, allow_plain_task=structural_heading
+            )
             table_display_title = (
                 _clean_heading_title(table_title)[0] if table_title else ""
             )
@@ -2196,7 +2400,19 @@ def parse_assessment_section(
                     standards=tuple(str(value) for value in fields["standards"]),
                 )
             )
-    items = [replace(item, order=order) for order, item in enumerate(items, 1)]
+    items = [
+        replace(
+            item,
+            order=order,
+            extraction_status=(
+                "bundle_review"
+                if item.extraction_status == "bounded"
+                and source_is_teaching_schedule_only(item.source_html)
+                else item.extraction_status
+            ),
+        )
+        for order, item in enumerate(items, 1)
+    ]
     detected_titles: list[str] = []
     for item in items:
         if item.extraction_status == "bounded" and item.title not in detected_titles:

@@ -1,10 +1,12 @@
 "use client";
 
 import renderMathInElement from "katex/contrib/auto-render";
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { normalizeExtractedTex } from "./MathText";
-import { segmentSourceTables } from "./lib/source-table-segmentation";
+import { hidePreviewedTables, segmentSourceTables, sourceDisplayNeedsReview } from "./lib/source-table-segmentation";
+import type { SourceTablePreview } from "./lib/catalog-api";
 
 function normalizeExtractedMathNodes(root: HTMLElement) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -19,13 +21,22 @@ function normalizeExtractedMathNodes(root: HTMLElement) {
   });
 }
 
-export default function SourceDocumentHtml({ html }: { html: string }) {
+export default function SourceDocumentHtml({ html, previews = [], coveredTableKeys, coveredExcerpt = false }: { html: string; previews?: SourceTablePreview[]; coveredTableKeys?: string[]; coveredExcerpt?: boolean }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [largeText, setLargeText] = useState(false);
   const [wideTables, setWideTables] = useState(false);
-  const segmented = useMemo(() => segmentSourceTables(html), [html]);
-  const hasTables = /<table\b/i.test(segmented.html);
+  const previewKey = previews.map((preview) => preview.url).join("|");
+  const [failedPreview, setFailedPreview] = useState<string>();
+  const imageFailed = failedPreview === previewKey;
+  const segmented = useMemo(() => {
+    const result = segmentSourceTables(html);
+    return !coveredExcerpt && !imageFailed && coveredTableKeys?.length
+      ? { ...result, html: hidePreviewedTables(result.html, coveredTableKeys) }
+      : result;
+  }, [html, coveredTableKeys, coveredExcerpt, imageFailed]);
+  const hasTables = /<table\b/i.test(segmented.html) || previews.length > 0;
+  const needsReview = useMemo(() => !(previews.length && coveredExcerpt && !imageFailed) && sourceDisplayNeedsReview(segmented.html), [segmented.html, previews.length, coveredExcerpt, imageFailed]);
   const transformed = (
     segmented.splitTableCount
     || segmented.mergedFragmentCount
@@ -33,6 +44,7 @@ export default function SourceDocumentHtml({ html }: { html: string }) {
     || segmented.orphanStandardGroupCount
     || segmented.recoveredNoteGroupCount
     || segmented.clampedRowspanCount
+    || segmented.clippedColspanCount
     || segmented.gradeContinuationRowCount
     || segmented.prunedTrailingColumnCount
     || segmented.normalizedLongHeaderCellCount
@@ -67,14 +79,32 @@ export default function SourceDocumentHtml({ html }: { html: string }) {
     };
   }, [expanded]);
 
+  const extracted = <div
+    ref={rootRef}
+    className={`sourceDocumentHtml${transformed ? " sourceDocumentHtmlSegmented" : ""}`}
+    data-source-table-sections={segmented.sectionCount || undefined}
+    data-source-merged-fragments={segmented.mergedFragmentCount || undefined}
+    data-source-reconstructed-cells={segmented.reconstructedCellCount || undefined}
+    data-source-orphan-standard-groups={segmented.orphanStandardGroupCount || undefined}
+    data-source-recovered-note-groups={segmented.recoveredNoteGroupCount || undefined}
+    data-source-clamped-rowspans={segmented.clampedRowspanCount || undefined}
+    data-source-clipped-colspans={segmented.clippedColspanCount || undefined}
+    data-source-grade-continuation-rows={segmented.gradeContinuationRowCount || undefined}
+    data-source-pruned-trailing-columns={segmented.prunedTrailingColumnCount || undefined}
+    data-source-normalized-long-header-cells={segmented.normalizedLongHeaderCellCount || undefined}
+    data-source-wide-tables={segmented.wideTableCount || undefined}
+    dangerouslySetInnerHTML={{ __html: segmented.html }}
+  />;
+
   return (
     <section
       className={`sourceDocumentViewer${expanded ? " isExpanded" : ""}${largeText ? " isLargeText" : ""}${wideTables ? " isWide" : ""}`}
       aria-label="원문 표 보기"
     >
+      {needsReview ? <p className="sourceExtractionNotice" role="status">일부 추출 문자나 병합 셀은 원문 대조가 필요합니다. 수식·배점은 학교알리미 원문에서 확인해 주세요.</p> : null}
       {hasTables ? (
         <div className="sourceDocumentToolbar" role="toolbar" aria-label="원문 표 표시 설정">
-          <span>복잡한 표는 화면을 넓혀 확인할 수 있습니다.</span>
+          <span>{previews.length ? "수식과 병합을 원문 표에서 확인할 수 있습니다." : "복잡한 표는 화면을 넓혀 확인할 수 있습니다."}</span>
           <div>
             <button type="button" aria-pressed={wideTables} onClick={() => setWideTables((value) => !value)}>
               {wideTables ? "기본 표 폭" : "표 폭 넓게"}
@@ -88,21 +118,19 @@ export default function SourceDocumentHtml({ html }: { html: string }) {
           </div>
         </div>
       ) : null}
-      <div
-        ref={rootRef}
-        className={`sourceDocumentHtml${transformed ? " sourceDocumentHtmlSegmented" : ""}`}
-        data-source-table-sections={segmented.sectionCount || undefined}
-        data-source-merged-fragments={segmented.mergedFragmentCount || undefined}
-        data-source-reconstructed-cells={segmented.reconstructedCellCount || undefined}
-        data-source-orphan-standard-groups={segmented.orphanStandardGroupCount || undefined}
-        data-source-recovered-note-groups={segmented.recoveredNoteGroupCount || undefined}
-        data-source-clamped-rowspans={segmented.clampedRowspanCount || undefined}
-        data-source-grade-continuation-rows={segmented.gradeContinuationRowCount || undefined}
-        data-source-pruned-trailing-columns={segmented.prunedTrailingColumnCount || undefined}
-        data-source-normalized-long-header-cells={segmented.normalizedLongHeaderCellCount || undefined}
-        data-source-wide-tables={segmented.wideTableCount || undefined}
-        dangerouslySetInnerHTML={{ __html: segmented.html }}
-      />
+      {previews.length ? <div className="sourceDocumentHtml sourceOriginalTables" data-source-original-table-count={previews.length}>
+        {imageFailed ? <p role="status">원문 표를 불러오지 못했습니다. 추출 표와 학교알리미 원문을 함께 확인해 주세요.</p> : previews.map((preview, index) => <figure key={preview.url}>
+          <Image className="sourceOriginalTableImage" src={preview.url} width={preview.width} height={preview.height}
+            alt={preview.page_context ? `수행평가가 포함된 원문 ${preview.page}쪽` : `수행평가 원문 표 ${index + 1}, 원문 ${preview.page}쪽`} unoptimized
+            onError={() => setFailedPreview(previewKey)} />
+          <figcaption>{preview.rendered_from_hangul ? "한글 원문 렌더링" : "원문"} {preview.page}쪽{preview.page_context ? " · 같은 페이지의 다른 평가나 안내가 함께 보일 수 있습니다." : ` · 표 ${index + 1}`}</figcaption>
+        </figure>)}
+        {!coveredExcerpt ? extracted : <details className="sourceExtractedTables" open={imageFailed} data-source-extraction-fallback="true" data-source-complete-excerpt="true">
+          <summary>추출 표 함께 보기</summary>
+          <p>추출 표에는 수식이나 병합이 다르게 표시될 수 있습니다. 위 원문 표를 기준으로 확인해 주세요.</p>
+          {extracted}
+        </details>}
+      </div> : extracted}
     </section>
   );
 }

@@ -9,7 +9,13 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from app.source_html import restore_escaped_table_rows, rubric_tables_from_source_html
+from app.source_html import (
+    repair_truncated_nested_rubric,
+    restore_escaped_table_rows,
+    rubric_tables_from_source_html,
+)
+from app.source_table_previews import matching_previews
+from app.standard_catalog import REGISTRIES, source_standard_codes
 
 SUBJECT_ORDER = {
     "수학": 1,
@@ -56,6 +62,29 @@ def search_tokens(value: str) -> list[str]:
 def like_pattern(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
+
+
+def case_period_filters(
+    semester: str | None,
+    academic_year: int | None,
+) -> tuple[list[str], list[int]]:
+    clauses: list[str] = []
+    values: list[int] = []
+    if semester == "unknown":
+        clauses.append(
+            "(json_array_length(c.academic_years_json) <> 1 "
+            "OR json_array_length(c.semesters_json) = 0)"
+        )
+    elif semester is not None:
+        clauses.append("EXISTS (SELECT 1 FROM json_each(c.semesters_json) WHERE value = ?)")
+        values.append(int(semester))
+    if academic_year is not None:
+        clauses.append(
+            "json_array_length(c.academic_years_json) = 1 "
+            "AND json_extract(c.academic_years_json, '$[0]') = ?"
+        )
+        values.append(academic_year)
+    return clauses, values
 
 
 class CatalogRepository:
@@ -126,9 +155,7 @@ class CatalogRepository:
         with self.connect() as connection:
             tables = {
                 str(row[0])
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_schema WHERE type = 'table'"
-                )
+                for row in connection.execute("SELECT name FROM sqlite_schema WHERE type = 'table'")
             }
             if "assessment_items" not in tables:
                 return empty
@@ -162,9 +189,7 @@ class CatalogRepository:
                 ORDER BY extraction_status
                 """
             ).fetchall()
-        excluded_reasons = {
-            str(row["extraction_status"]): int(row["count"]) for row in reason_rows
-        }
+        excluded_reasons = {str(row["extraction_status"]): int(row["count"]) for row in reason_rows}
         return {
             "public_cases": public_cases,
             "public_items": public_items,
@@ -242,25 +267,26 @@ class CatalogRepository:
         include_ambiguous: bool,
         limit: int,
         offset: int,
+        semester: str | None = None,
+        academic_year: int | None = None,
     ) -> tuple[list[dict[str, object]], int]:
         joins: list[str] = []
         clauses: list[str] = []
         parameters: list[object] = []
         search = search_tokens(query or "")
         if tag:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM json_each(c.action_tags_json) WHERE value = ?)"
-            )
+            clauses.append("EXISTS (SELECT 1 FROM json_each(c.action_tags_json) WHERE value = ?)")
             parameters.append(tag)
         for token in search:
             clauses.append(
                 "(c.primary_task_name LIKE ? ESCAPE '\\' "
+                "OR c.task_names_json LIKE ? ESCAPE '\\' "
                 "OR c.evidence_excerpt LIKE ? ESCAPE '\\' "
                 "OR c.school_name LIKE ? ESCAPE '\\' "
                 "OR c.subject LIKE ? ESCAPE '\\')"
             )
             pattern = like_pattern(token)
-            parameters.extend([pattern, pattern, pattern, pattern])
+            parameters.extend([pattern, pattern, pattern, pattern, pattern])
         if curriculum:
             if include_ambiguous and subject:
                 clauses.append("c.curriculum IN (?, 'shared')")
@@ -276,6 +302,9 @@ class CatalogRepository:
         if district:
             clauses.append("c.district = ?")
             parameters.append(district)
+        period_clauses, period_values = case_period_filters(semester, academic_year)
+        clauses.extend(period_clauses)
+        parameters.extend(period_values)
         if source_status == "confirmed":
             # The publication builder assigns this value only after at least one
             # bounded table/heading item passes every public-release gate.  Use
@@ -309,15 +338,22 @@ class CatalogRepository:
         return [self._case_item(row) for row in rows], total
 
     def facets(
-        self, curriculum: str | None, subject: str | None, region: str | None
+        self,
+        curriculum: str | None,
+        subject: str | None,
+        region: str | None,
+        semester: str | None = None,
+        academic_year: int | None = None,
     ) -> dict[str, list[dict[str, object]]]:
         clauses: list[str] = []
         parameters: list[object] = []
         with self.connect() as connection:
-            has_detail_items = connection.execute(
-                "SELECT 1 FROM sqlite_schema WHERE type = 'table' "
-                "AND name = 'assessment_items'"
-            ).fetchone() is not None
+            has_detail_items = (
+                connection.execute(
+                    "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'assessment_items'"
+                ).fetchone()
+                is not None
+            )
         if has_detail_items:
             # See cases(): source_detail is the audited public-case marker.
             clauses.append("c.title_basis = 'source_detail'")
@@ -330,15 +366,16 @@ class CatalogRepository:
         if subject:
             clauses.append("c.subject = ?")
             parameters.append(subject)
+        period_clauses, period_values = case_period_filters(semester, academic_year)
+        clauses.extend(period_clauses)
+        parameters.extend(period_values)
         where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
         district_clauses = [*clauses]
         district_parameters = [*parameters]
         if region:
             district_clauses.append("c.region = ?")
             district_parameters.append(region)
-        district_where = (
-            " WHERE " + " AND ".join(district_clauses) if district_clauses else ""
-        )
+        district_where = " WHERE " + " AND ".join(district_clauses) if district_clauses else ""
         with self.connect() as connection:
             region_rows = connection.execute(
                 f"""
@@ -382,6 +419,161 @@ class CatalogRepository:
                 {"value": str(row["value"]), "count": int(row["count"])} for row in tag_rows
             ],
         }
+
+    def standard_references(
+        self,
+        subject: str,
+        standard: str,
+        semester: str | None,
+        limit: int,
+        offset: int,
+        curriculum: str = "2022",
+    ) -> dict[str, object]:
+        clauses, values = case_period_filters(semester, 2026)
+        where = " AND ".join(clauses)
+        with self.connect() as db:
+            rows = db.execute(
+                f"""
+                SELECT i.item_id, i.case_id, i.title, i.overview, i.method, i.standards_json,
+                       i.rubric_html_char_count, c.school_name, c.region,
+                       c.academic_years_json, c.semesters_json
+                FROM assessment_items i JOIN cases c USING (case_id)
+                JOIN assessment_item_rankings r ON r.item_id=i.item_id
+                WHERE c.curriculum=? AND c.subject=? AND {where}
+                  AND i.extraction_status='bounded' AND i.title_basis IN ('table','heading')
+                ORDER BY r.priority_score DESC, i.item_id
+            """,
+                [curriculum, subject, *values],
+            ).fetchall()
+        registry = REGISTRIES[curriculum]
+        subject_source = registry.get("subject_sources", {}).get(subject, registry)
+        codes = [source_standard_codes(row["standards_json"], subject, curriculum) for row in rows]
+        options = [
+            {**entry, "count": sum(entry["key"] in found for found in codes)}
+            for entry in registry["standards"]
+            if entry["subject"] == subject
+        ]
+        selected = next((entry for entry in options if entry["key"] == standard), None)
+        if not standard:
+            selected = next(
+                (entry for entry in options if entry["count"]), next(iter(options), None)
+            )
+        matches = [
+            row
+            for row, found in zip(rows, codes, strict=True)
+            if selected and selected["key"] in found
+        ]
+        return {
+            "curriculum": curriculum,
+            "subject": subject,
+            "standard": selected,
+            "standards": options,
+            "total": len(matches),
+            "source_url": subject_source["source_url"],
+            "items": [
+                {
+                    "item_id": row["item_id"],
+                    "case_id": row["case_id"],
+                    "title": row["title"],
+                    "overview": row["overview"],
+                    "method": row["method"],
+                    "school_name": row["school_name"],
+                    "region": row["region"],
+                    "academic_years": parse_json_list(row["academic_years_json"]),
+                    "semesters": parse_json_list(row["semesters_json"]),
+                    "has_rubric": bool(row["rubric_html_char_count"]),
+                    "standards": parse_json_list(row["standards_json"]),
+                }
+                for row in matches[offset : offset + limit]
+            ],
+        }
+
+    def design_references(
+        self,
+        topic: str,
+        method: str,
+        limit: int,
+        offset: int,
+    ) -> dict[str, object]:
+        with self.connect() as db:
+            ready = db.execute(
+                "SELECT 1 FROM sqlite_schema WHERE name='design_index_tags'"
+            ).fetchone()
+            if not ready:
+                return {
+                    "available": False,
+                    "indexed_items": 0,
+                    "total": 0,
+                    "topics": {},
+                    "methods": {},
+                    "items": [],
+                }
+            joins = """
+                FROM design_index_items pilot
+                JOIN assessment_items item ON item.item_id=pilot.item_id
+                JOIN cases c ON c.case_id=item.case_id
+                JOIN assessment_item_rankings ranking ON ranking.item_id=item.item_id
+            """
+            public = "item.extraction_status='bounded' AND item.title_basis IN ('table','heading')"
+            filter_axis = """EXISTS (SELECT 1 FROM design_index_tags tag
+                WHERE tag.item_id=pilot.item_id AND tag.axis=? AND tag.tag=?)"""
+            filters = [pair for pair in (("topic", topic), ("method", method)) if pair[1]]
+            where = " AND ".join([public, *([filter_axis] * len(filters))])
+            values = [value for pair in filters for value in pair]
+            items = db.execute(
+                f"""
+                SELECT item.item_id, item.case_id, item.title, item.rubric_html_char_count,
+                       c.school_name, c.region
+                {joins} WHERE {where}
+                ORDER BY ranking.priority_score DESC, item.item_id LIMIT ? OFFSET ?
+            """,
+                [*values, limit, offset],
+            ).fetchall()
+            total = db.execute(f"SELECT count(*) {joins} WHERE {where}", values).fetchone()[0]
+            indexed_items = db.execute(f"SELECT count(*) {joins} WHERE {public}").fetchone()[0]
+            facets = {}
+            for axis, opposite, value in (("topic", "method", method), ("method", "topic", topic)):
+                conditions = [public, "facet.axis=?"]
+                parameters = [axis]
+                if value:
+                    conditions.append(filter_axis)
+                    parameters.extend((opposite, value))
+                facets[axis] = dict(
+                    db.execute(
+                        f"""
+                    SELECT facet.tag, count(*) {joins}
+                    JOIN design_index_tags facet ON facet.item_id=pilot.item_id
+                    WHERE {" AND ".join(conditions)} GROUP BY facet.tag
+                """,
+                        parameters,
+                    ).fetchall()
+                )
+            result = []
+            for item in items:
+                tags = db.execute(
+                    """SELECT axis, tag, source_field, evidence FROM design_index_tags
+                    WHERE item_id=? ORDER BY axis, tag""",
+                    (item["item_id"],),
+                ).fetchall()
+                result.append(
+                    {
+                        "item_id": item["item_id"],
+                        "case_id": item["case_id"],
+                        "title": item["title"],
+                        "school_name": item["school_name"],
+                        "region": item["region"],
+                        "has_rubric": bool(item["rubric_html_char_count"]),
+                        "tags": [dict(tag) for tag in tags],
+                    }
+                )
+            return {
+                "available": True,
+                "indexed_items": indexed_items,
+                "total": total,
+                "topics": facets["topic"],
+                "methods": facets["method"],
+                "items": result,
+            }
 
     def case(self, case_id: str) -> dict[str, object] | None:
         with self.connect() as connection:
@@ -430,7 +622,8 @@ class CatalogRepository:
             row = connection.execute(
                 f"""
                 SELECT item.*, cases.curriculum, cases.subject, cases.school_name,
-                       cases.region, {district_select}, cases.candidate_name, cases.source_url
+                       cases.region, {district_select}, cases.candidate_name,
+                       cases.source_url, cases.source_sha256
                 FROM assessment_items item
                 JOIN cases ON cases.case_id = item.case_id
                 WHERE item.item_id = ?
@@ -460,6 +653,8 @@ class CatalogRepository:
             )
             if not rubric_html.strip():
                 rubric_html = rubric_tables_from_source_html(source_html)
+            else:
+                rubric_html = repair_truncated_nested_rubric(rubric_html, source_html)
             item["has_rubric"] = bool(rubric_html.strip())
         item.update(
             {
@@ -473,6 +668,12 @@ class CatalogRepository:
                 "source_url": str(row["source_url"]),
                 "source_html": source_html,
                 "rubric_html": rubric_html,
+                **matching_previews(
+                    str(row["item_id"]),
+                    str(row["source_sha256"]),
+                    bytes(row["source_html_zlib"]) if source_available else None,
+                    bytes(row["rubric_html_zlib"]) if source_available else None,
+                ),
             }
         )
         return item
@@ -488,10 +689,13 @@ class CatalogRepository:
         limit: int,
     ) -> list[dict[str, object]]:
         with self.connect() as connection:
-            has_rankings = connection.execute(
-                "SELECT 1 FROM sqlite_schema WHERE type = 'table' "
-                "AND name = 'assessment_item_rankings'"
-            ).fetchone() is not None
+            has_rankings = (
+                connection.execute(
+                    "SELECT 1 FROM sqlite_schema WHERE type = 'table' "
+                    "AND name = 'assessment_item_rankings'"
+                ).fetchone()
+                is not None
+            )
             if has_rankings:
                 case_columns = {
                     str(column[1]) for column in connection.execute("PRAGMA table_info(cases)")
@@ -538,8 +742,7 @@ class CatalogRepository:
                         "category": str(row["category"]),
                         "priority_score": int(row["priority_score"]),
                         "priority_signals": [
-                            str(value)
-                            for value in parse_json_list(row["priority_signals_json"])
+                            str(value) for value in parse_json_list(row["priority_signals_json"])
                         ],
                     }
                 )
@@ -658,12 +861,10 @@ class CatalogRepository:
             ).fetchall()
         return {
             "regions": [
-                {"value": str(row["value"]), "count": int(row["count"])}
-                for row in region_rows
+                {"value": str(row["value"]), "count": int(row["count"])} for row in region_rows
             ],
             "districts": [
-                {"value": str(row["value"]), "count": int(row["count"])}
-                for row in district_rows
+                {"value": str(row["value"]), "count": int(row["count"])} for row in district_rows
             ],
             "action_tags": [],
         }
@@ -679,10 +880,12 @@ class CatalogRepository:
         limit: int,
     ) -> list[dict[str, object]]:
         with self.connect() as connection:
-            has_detail_items = connection.execute(
-                "SELECT 1 FROM sqlite_schema WHERE type = 'table' "
-                "AND name = 'assessment_items'"
-            ).fetchone() is not None
+            has_detail_items = (
+                connection.execute(
+                    "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'assessment_items'"
+                ).fetchone()
+                is not None
+            )
         clauses = [
             "c.category = ?",
             "c.priority_score >= 38",
@@ -698,7 +901,6 @@ class CatalogRepository:
                     "c.title_basis = 'source_detail'",
                     "EXISTS (SELECT 1 FROM assessment_items detail_item "
                     "WHERE detail_item.case_id = c.case_id "
-                    "AND detail_item.item_order = 1 "
                     "AND detail_item.extraction_status = 'bounded' "
                     "AND detail_item.title_basis IN ('table', 'heading'))",
                 ]
@@ -860,9 +1062,7 @@ class CatalogRepository:
             "timing": str(row["timing"]),
             "score": str(row["score"]),
             "weight": str(row["weight"]),
-            "standards": [
-                str(value) for value in parse_json_list(row["standards_json"])
-            ],
+            "standards": [str(value) for value in parse_json_list(row["standards_json"])],
             "has_rubric": source_available and int(row["rubric_html_char_count"]) > 0,
             "source_available": source_available,
         }

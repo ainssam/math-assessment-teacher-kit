@@ -205,6 +205,7 @@ try {
       orphan_standard_group_count: 0,
       recovered_note_group_count: 0,
       clamped_rowspan_count: 0,
+      clipped_colspan_count: 0,
       grade_continuation_row_count: 0,
       pruned_trailing_column_count: 0,
       normalized_long_header_cell_count: 0,

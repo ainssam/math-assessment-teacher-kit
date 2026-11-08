@@ -3,6 +3,38 @@ import { describe, expect, it } from "vitest";
 import { segmentSourceTables } from "../app/lib/source-table-segmentation";
 
 describe("원문 표 구획 분리", () => {
+  it("빈 세로 여백과 겹친 PDF 내용 셀만 경계까지 줄이고 문장은 보존한다", () => {
+    const source = `<table><tr><th>성취기준</th><th>수준</th><th>내용</th><td rowspan="3"></td></tr>
+      <tr><td rowspan="2">[10공수1-02-07]</td><td>A</td><td colspan="2" rowspan="2">삼차방정식을 풀고 과정을 설명한다.</td></tr>
+      <tr><td>B</td></tr></table>`;
+    const result = segmentSourceTables(source);
+    const container = document.createElement("div");
+    container.innerHTML = result.html;
+    expect(result.clippedColspanCount).toBe(1);
+    const cell = container.querySelector('[data-source-colspan-clipped="true"]') as HTMLTableCellElement;
+    expect(cell.colSpan).toBe(1);
+    expect(cell.rowSpan).toBe(2);
+    expect(cell.textContent).toBe("삼차방정식을 풀고 과정을 설명한다.");
+    expect(container.textContent).toContain("[10공수1-02-07]");
+  });
+
+  it("다른 내용 셀과 충돌하는 병합은 임의로 줄이지 않는다", () => {
+    const source = `<table><tr><td>첫 열</td><td rowspan="2">보존할 내용</td></tr>
+      <tr><td colspan="2">다른 내용</td></tr></table>`;
+    const result = segmentSourceTables(source);
+    expect(result.clippedColspanCount).toBe(0);
+    expect(result.html).toContain('colspan="2"');
+    expect(result.html).toContain("보존할 내용");
+  });
+
+  it("공통수학과 기본수학의 표 밖 성취기준 코드도 함께 읽게 묶는다", () => {
+    const source = `<p>[10공수1-01-01]</p><p>[10공수1-01-02]</p><h2>다음</h2>
+      <p>[10기수2-01-01]</p><p>[10기수2-01-02]</p>`;
+    const result = segmentSourceTables(source);
+    expect(result.orphanStandardGroupCount).toBe(2);
+    expect(result.html).toContain("[10공수1-01-02]");
+    expect(result.html).toContain("[10기수2-01-02]");
+  });
   it("긴 결합 표를 원문 표제어에 따라 별도 표로 나눈다", () => {
     const source = `<p>원문 제목</p><table><tbody>
       <tr><th>평가 영역명</th><td>함수 탐구</td></tr>

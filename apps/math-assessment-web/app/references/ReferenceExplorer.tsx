@@ -75,7 +75,7 @@ export default function ReferenceExplorer() {
   }, [curriculum, subject, region, district, category]);
 
   useEffect(() => {
-    const query = apiParameters({ curriculum, subject, region, district, category: category === "inquiry" ? undefined : category });
+    const query = apiParameters({ view: "categories", curriculum, subject, region, district, category: category === "inquiry" ? undefined : category });
     router.replace(query ? `/references?${query}` : "/references", { scroll: false });
   }, [curriculum, subject, region, district, category, router]);
 
@@ -97,7 +97,7 @@ export default function ReferenceExplorer() {
 
     <section className="referenceBoundary" aria-label="원문 근거 확인도 기준">
       <div><strong>학교·교사 순위가 아닙니다.</strong><span>원문 표 제목, 평가 방법·배점, 성취기준, 루브릭이 함께 확인되는 정도로 설계 참고 순서를 정리했습니다.</span></div>
-      <Link href="/cases">전체 라이브러리에서 찾기 →</Link>
+      <Link href="/references">2학기 미적분Ⅰ 주제 × 방법 보기</Link>
     </section>
 
     <section className="caseFilterPanel referenceFilterPanel" aria-label="유형별 설계 참고 필터">
@@ -115,7 +115,7 @@ export default function ReferenceExplorer() {
       <div className="categoryTabs" role="tablist" aria-label="수행평가 유형">{CATEGORIES.map((item) => <button type="button" role="tab" aria-selected={category === item.id} className={category === item.id ? "selected" : ""} key={item.id} onClick={() => { beginReload(); setCategory(item.id); }}>{item.label}</button>)}</div>
       {loading ? <div className="compactLoading" role="status">설계 참고 순서를 정리하고 있습니다.</div> : null}
       {error ? <div className="errorPanel" role="alert"><strong>자료를 불러오지 못했습니다.</strong><p>{error}</p></div> : null}
-      {!loading && !error && items.length ? <div className="tableScroll"><table className="curatedTable"><thead><tr><th>표시 순서</th><th>수행평가명</th><th>과목·학교</th><th>확인된 근거</th><th>확인</th></tr></thead><tbody>{items.map((item, index) => <tr key={item.item_id}><td data-label="표시 순서"><strong className="rankNumber">{index + 1}</strong></td><td data-label="수행평가명"><strong><MathText text={item.title} /></strong>{item.overview ? <p><MathText text={item.overview} /></p> : null}</td><td data-label="과목·학교"><span>{item.curriculum} 개정 · {item.subject}</span><small>{item.school_name}<br />{item.region}{item.district ? ` ${item.district}` : ""}</small></td><td data-label="확인된 근거"><div className="signalChips">{item.priority_signals.map((signal) => <span key={signal}>{signal}</span>)}</div></td><td data-label="확인"><Link href={`/cases/${item.case_id}?item=${item.item_id}`}>원문 표 보기 →</Link></td></tr>)}</tbody></table></div> : null}
+      {!loading && !error && items.length ? <div className="tableScroll"><table className="curatedTable"><thead><tr><th>표시 순서</th><th>수행평가명</th><th>과목·학교</th><th>확인된 근거</th><th>확인</th></tr></thead><tbody>{items.map((item, index) => <tr key={item.item_id}><td data-label="표시 순서"><strong className="rankNumber">{index + 1}</strong></td><td data-label="수행평가명"><strong><MathText text={item.title} /></strong>{item.overview ? <p><MathText text={item.overview} /></p> : null}</td><td data-label="과목·학교"><span>{item.curriculum === "shared" ? "교육과정 확인 필요" : `${item.curriculum} 개정`} · {item.subject}</span><small>{item.school_name}<br />{item.region}{item.district ? ` ${item.district}` : ""}</small></td><td data-label="확인된 근거"><div className="signalChips">{item.priority_signals.map((signal) => <span key={signal}>{signal}</span>)}</div></td><td data-label="확인"><Link href={`/cases/${item.case_id}?item=${item.item_id}`}>원문 표 보기 →</Link></td></tr>)}</tbody></table></div> : null}
       {!loading && !error && items.length === 0 ? <p className="compactEmpty">이 조건에서 원문 표 제목·구조까지 확인된 설계 참고 사례가 아직 없습니다. 전체 라이브러리에서 원문 묶음도 함께 찾아볼 수 있습니다.</p> : null}
       {interpretation ? <p className="rankingBoundary">{interpretation}</p> : null}
     </section>

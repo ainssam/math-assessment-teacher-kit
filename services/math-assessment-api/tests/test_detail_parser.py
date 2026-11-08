@@ -8,11 +8,16 @@ from scripts.build_math_assessment_publish_db import case_identifier
 from scripts.math_assessment_detail_parser import (
     _hinted_table_items,
     _matched_rubric_html,
+    _table_fragments_with_spans,
     balance_table_tags,
+    explicit_segment_title,
     heading_title_is_structural,
+    labelled_numeric_fields,
     markdown_fragment_to_html,
     parse_assessment_section,
     segment_subject_alignment,
+    source_is_teaching_schedule_only,
+    teaching_schedule_header_evidence,
 )
 from scripts.repair_math_assessment_titles import (
     credible_title,
@@ -21,6 +26,85 @@ from scripts.repair_math_assessment_titles import (
     source_is_non_math_leak,
     strict_source_titles,
 )
+
+
+def test_nested_table_fragment_retains_outer_tail_and_exact_source_span():
+    table = (
+        "<table><tr><td>채점기준<table><tr><td>10점</td></tr></table></td></tr>"
+        "<tr><td>마지막 20점</td></tr></table>"
+    )
+    source = "앞부분\n" + table + "\n뒷부분"
+    fragments = _table_fragments_with_spans(source)
+    assert len(fragments) == 1
+    start, end, recovered = fragments[0]
+    assert recovered == source[start:end] == table
+
+
+def test_overview_point_total_wins_over_internal_one_point_journal_scale():
+    source = (
+        "<table><tr><td>평가 시기</td><td>1학기 수시 (3~7월)</td>"
+        "<td>점수</td><td>20</td></tr><tr><td>평가요소</td><td>배점</td></tr>"
+        "<tr><td>성찰일지</td><td>하나의 성찰일지를 1점 만점으로 산출한다.</td></tr></table>"
+    )
+    assert labelled_numeric_fields(source) == {"score": "20점"}
+
+
+def test_numeric_overview_does_not_promote_rubric_points_or_choose_between_totals():
+    rubric = (
+        "<table><tr><th>평가요소</th><th>점수</th></tr><tr><td>풀이</td><td>5</td></tr></table>"
+    )
+    assert labelled_numeric_fields(rubric) == {}
+    source = (
+        "<table><tr><td>영역 만점</td><td>100점</td><td>반영 비율</td><td>20%</td></tr>"
+        "<tr><td>만점</td><td>20점</td></tr></table>"
+    )
+    assert labelled_numeric_fields(source) == {"weight": "20%"}
+
+
+def test_numeric_overview_ignores_exam_and_whole_performance_summary_totals():
+    source = (
+        "<table><tr><th>평가유형</th><th>정기시험</th><th>수행평가</th><th>합계</th></tr>"
+        "<tr><td>반영비율</td><td>60%</td><td>40%</td><td>100%</td></tr></table>"
+    )
+    assert labelled_numeric_fields(source) == {}
+    all_performance = source.replace("<th>정기시험</th>", "").replace("<td>60%</td>", "")
+    assert labelled_numeric_fields(all_performance) == {}
+    transposed = (
+        "<table><tr><td>평가종류</td><td>수행평가</td></tr>"
+        "<tr><td>반영비율</td><td>100%</td></tr>"
+        "<tr><td>영역별 만점(반영비율)</td><td>25점(25%)</td></tr></table>"
+    )
+    assert labelled_numeric_fields(transposed)["weight"] == "25%"
+
+
+def test_task_policy_headings_are_not_published_as_assessment_names():
+    assert heading_title_is_structural(
+        "AI 리서치를 통한 대수학적 원리 탐색 및 가치 비평활동 수행평가의 유의사항"
+    )
+    assert heading_title_is_structural("유의사항 안내: 전자기기를 차단하고 대면 관찰하여 평가")
+    assert not heading_title_is_structural("AI 리서치를 통한 대수학적 원리 탐색 및 가치 비평활동")
+
+
+def test_lost_pdf_rows_still_identify_a_teaching_calendar_header():
+    source = (
+        "<p>1. 함수</p><p>12월</p><p>주</p><p>단원명 (영역명)</p>"
+        "<p>교육과정 성취기준</p><p>수업방법</p><p>평가방법</p>"
+        "<p>수업・평가 연계의 주안점</p><p>다음 시기 2학기</p>"
+        "<p>★수행평가 연계: 함수 개념을 말과 글로 설명하기</p>"
+    )
+    assert teaching_schedule_header_evidence(source)
+    assert source_is_teaching_schedule_only(source)
+
+
+def test_schedule_guard_preserves_real_scoring_and_distant_policy_words():
+    header = "시기 월주 단원명 교육과정 성취기준 수업방법 평가방법 수업-평가 연계 주안점"
+    real = header + "<table><tr><th>채점기준</th><th>배점</th></tr>" \
+        "<tr><td>과정 설명</td><td>20점</td></tr></table>"
+    assert not source_is_teaching_schedule_only(real)
+    assert not teaching_schedule_header_evidence(
+        "수업방법을 개선한다. " + "수학 탐구 활동을 되돌아본다. " * 30
+        + "교육과정 성취기준, 시기, 단원명, 평가방법을 참고한다."
+    )
 
 
 def test_audit_separates_teaching_calendar_from_assessment_scoring() -> None:
@@ -49,14 +133,20 @@ def test_non_math_source_leak_is_detected_without_math_evidence() -> None:
 
 
 def test_catalog_spelling_only_repairs_source_equivalent_spacing() -> None:
-    assert source_aligned_catalog_spelling(
-        "경우의 수를 적용한 실생 활 문제 탐구 및 발표",
-        ["경우의 수를 적용한 실생활 문제 탐구 및 발표"],
-    ) == "경우의 수를 적용한 실생활 문제 탐구 및 발표"
-    assert source_aligned_catalog_spelling(
-        "수학 주제 탐구",
-        ["수학 독서 탐구"],
-    ) == "수학 주제 탐구"
+    assert (
+        source_aligned_catalog_spelling(
+            "경우의 수를 적용한 실생 활 문제 탐구 및 발표",
+            ["경우의 수를 적용한 실생활 문제 탐구 및 발표"],
+        )
+        == "경우의 수를 적용한 실생활 문제 탐구 및 발표"
+    )
+    assert (
+        source_aligned_catalog_spelling(
+            "수학 주제 탐구",
+            ["수학 독서 탐구"],
+        )
+        == "수학 주제 탐구"
+    )
 
 
 def test_subject_code_alignment_does_not_confuse_math_one_and_two() -> None:
@@ -115,7 +205,9 @@ def test_assessment_type_matrix_uses_the_tasks_own_weight_and_schedule() -> None
 </table>
 """
     section = parse_assessment_section(source, "미적분Ⅰ", ("수학 독서 보고서", "미분 활용 탐구"))
-    assert [(item.title, item.method, item.score, item.weight, item.timing) for item in section.items] == [
+    assert [
+        (item.title, item.method, item.score, item.weight, item.timing) for item in section.items
+    ] == [
         ("수학 독서 보고서", "프로젝트", "100점", "30%", "3월"),
         ("미분 활용 탐구", "프로젝트", "100점", "20%", "6월"),
     ]
@@ -128,7 +220,9 @@ def test_a_task_mention_in_a_teaching_schedule_cannot_supply_a_card() -> None:
 <tr><td>함수</td><td>[12대수01-01]</td><td>토론</td><td>자료 분석 프로젝트</td><td>5월</td></tr>
 </table>
 """
-    assert _hinted_table_items(schedule, "대수", "subject_heading", 0, ("자료 분석 프로젝트",)) == []
+    assert (
+        _hinted_table_items(schedule, "대수", "subject_heading", 0, ("자료 분석 프로젝트",)) == []
+    )
 
 
 def test_assessment_method_matrix_reads_only_the_performance_columns() -> None:
@@ -538,6 +632,119 @@ def test_explicit_task_field_replaces_a_generic_process_assessment_heading() -> 
     assert item.extraction_status == "bounded"
 
 
+@pytest.mark.parametrize(
+    "name_label", ["평가영역명3", "평가 영역명 12", "수행평가명", "과제명"]
+)
+@pytest.mark.parametrize("format", ["html", "markdown"])
+def test_named_task_label_outranks_an_earlier_plain_task_description(
+    name_label: str, format: str
+) -> None:
+    description = "실생활 자료를 수집하여 함수로 표현하고 변화 양상을 분석하는 보고서 작성하기"
+    title = "실생활 자료의 함수 모델링 탐구"
+    rows = [
+        ("수행과제", description),
+        (name_label, title),
+        ("성취기준", "[12대수01-01]"),
+        ("평가방법", "프로젝트"),
+    ]
+    if format == "html":
+        source = "<table>" + "".join(
+            f"<tr><th>{label}</th><td>{value}</td></tr>" for label, value in rows
+        ) + "</table>"
+    else:
+        source = "| 항목 | 내용 |\n| --- | --- |\n" + "\n".join(
+            f"| {label} | {value} |" for label, value in rows
+        )
+
+    assert explicit_segment_title(source) == title
+
+
+def test_plain_task_description_does_not_overwrite_real_lettered_headings_or_duplicate_items():
+    first_description = "이차곡선과 공간도형의 정의를 활용하여 해결 과정을 논리적으로 설명하기"
+    second_description = "단원별 핵심 개념을 정리하고 문제 해결 과정을 기록하여 제출하기"
+    source = f"""
+    # 2026학년도 (기하)과 교수학습 및 평가 운영 계획
+    ## 수행평가 세부 기준
+    가. 기하 원리의 논증
+    <table>
+      <tr><th>수행과제</th><td>{first_description}</td></tr>
+      <tr><th>성취기준</th><td>[12기하01-01]</td></tr>
+      <tr><th>평가방법</th><td>논술</td></tr>
+      <tr><th>평가요소</th><th>채점기준</th><th>배점</th></tr>
+      <tr><td>논증</td><td>정당화 과정이 타당함</td><td>15점</td></tr>
+    </table>
+    나. 개념 포트폴리오
+    <table>
+      <tr><th>수행과제</th><td>{second_description}</td></tr>
+      <tr><th>성취기준</th><td>[12기하03-01]</td></tr>
+      <tr><th>평가방법</th><td>포트폴리오</td></tr>
+      <tr><th>평가요소</th><th>채점기준</th><th>배점</th></tr>
+      <tr><td>개념</td><td>개념의 관계가 정확함</td><td>10점</td></tr>
+    </table>
+    """
+
+    section = parse_assessment_section(source, "기하")
+    public = [item for item in section.items if item.extraction_status == "bounded"]
+
+    assert [item.title for item in public] == ["기하 원리의 논증", "개념 포트폴리오"]
+    assert all(item.title_basis == "heading" for item in public)
+    assert first_description in public[0].source_html
+    assert second_description in public[1].source_html
+    assert "개념의 관계가 정확함" not in public[0].rubric_html
+    assert "개념의 관계가 정확함" in public[1].rubric_html
+
+
+@pytest.mark.parametrize("name_label", ["평가영역명", "평가영역명3"])
+@pytest.mark.parametrize(
+    "heading", ["가. 개념 정리 활동", "1) 교육과정 성취기준 및 평가기준, 평가 요소 및 배점"]
+)
+def test_separate_description_table_does_not_add_a_second_task_before_named_table(
+    name_label, heading
+):
+    description = "핵심 개념을 구조화하고 대표 문제의 단계별 해결 과정을 체계적으로 기록하기"
+    source = f"""
+    # 2026학년도 (공통수학2)과 교수학습 및 평가 운영 계획
+    ## 수행평가 세부 기준
+    {heading}
+    <table>
+      <tr><th>수행과제</th><td>{description}</td></tr>
+      <tr><th>성취기준</th><td>[10공수2-01-01]</td></tr>
+      <tr><th>평가방법</th><td>포트폴리오</td></tr>
+    </table>
+    <table>
+      <tr><th>{name_label}</th><td>수학 개념의 연결과 구조화</td><th>영역만점</th><td>20점</td></tr>
+      <tr><th>평가요소</th><th>채점기준</th><th>배점</th></tr>
+      <tr><td>구조화</td><td>관계가 명확함</td><td>20점</td></tr>
+    </table>
+    """
+
+    section = parse_assessment_section(source, "공통수학2")
+    public = [item for item in section.items if item.extraction_status == "bounded"]
+
+    assert len(public) == 1
+    assert public[0].title == "수학 개념의 연결과 구조화"
+    assert public[0].title_basis == "table"
+    assert description in public[0].source_html
+    assert "관계가 명확함" in public[0].rubric_html
+
+
+def test_long_source_authored_name_is_preserved_without_a_new_length_heuristic():
+    title = (
+        "생활 속 자료를 함수의 개념 및 그래프로 연결하고 수학적 근거에 따라 "
+        "여러 해석의 타당성을 비교하여 설명하는 융합 탐구 보고서"
+    )
+    assert len(title) > 60
+    source = (
+        "<table><tr><th>수행과제</th><td>자료를 분석하여 보고서 작성하기</td></tr>"
+        f"<tr><th>수행평가명</th><td>{title}</td></tr></table>"
+    )
+
+    assert explicit_segment_title(source) == title
+    assert explicit_segment_title(
+        f"<table><tr><th>수행과제</th><td>{title}</td></tr></table>"
+    ) == title
+
+
 def test_long_task_instruction_does_not_replace_the_source_heading_as_a_title() -> None:
     source = """
     # 2026학년도 (공통수학1)과 교수학습 및 평가 운영 계획
@@ -713,9 +920,22 @@ def test_structural_subheading_is_not_published_as_an_assessment_name() -> None:
         "평가(정기시험 및 수행평가)의 영역, 요소, 방법, 시기, 횟수, 반영비율",
         "성취기준을 분석하여 적합한 평가 요소를 도출하고 성취수준을 판별",
         "학생의 수업 시간 활동 및 내용을 작성하여 기록",
+        "안내된 절차에 따라 좌표공간에서 두 점 사이의 거리를 구",
+        "학생의 학습 활동에 대한 효과를 높이고 학습 활동 중 오류를 확인하여",
+        "수행평가 세부계획에 의거, 학생들의 수행 과정과 결과를 평가하고",
+        "평가의 결과는 차후 평가 계획 수립에 반영하고 교수학습을 개선",
+        "• 학습자의 학업 및 인성지도, 상담자료로 활용 • 평가 결과 기록",
     ],
 )
 def test_policy_and_standard_headings_are_structural(title: str) -> None:
+    assert heading_title_is_structural(title)
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["5\x01. 수행평가 세부기준", "6\x01. 정의적 능력 평가", "7\x01. 성취기준별 성취수준"],
+)
+def test_legacy_outline_control_bytes_do_not_create_task_titles(title: str) -> None:
     assert heading_title_is_structural(title)
 
 
@@ -825,7 +1045,7 @@ def test_policy_and_standard_headings_are_structural(title: str) -> None:
         "최하 3점부터 최고 20점까지 0.5점 급간으로 점수를 부여하며 세부 내용은 아래와 같다.",
         "공교육 정상화 촉진 및 선행교육 규제에 관한 특별법에 따라 학생이 배운 범위만 평가",
         (
-        "수행평가 결과물에 AI 활용 여부와 활용 목적을 간단히 기록하여야 하며 "
+            "수행평가 결과물에 AI 활용 여부와 활용 목적을 간단히 기록하여야 하며 "
             "AI가 생성한 내용을 그대로 제출하면 불이익을 받을 수 있음."
         ),
         "학기 단위 성취수준 설정,",

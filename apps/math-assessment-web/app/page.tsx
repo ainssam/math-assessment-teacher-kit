@@ -1,9 +1,10 @@
 import Link from "./SiteLink";
+import InstallApp from "./InstallApp";
 
-const metrics = [
-  { value: "1,537", label: "공개 확정 학교" },
-  { value: "10,760", label: "공개 수행평가" },
-  { value: "4,863", label: "공개 확정 사례" },
+const examples = [
+  { topic: "극한과 연속", method: "문항제작", search: "topic=limits&method=problem-writing" },
+  { topic: "미분", method: "그래프·시각화", search: "topic=derivatives&method=graphing" },
+  { topic: "적분", method: "추론·증명", search: "topic=integrals&method=reasoning" },
 ];
 
 const workflow = [
@@ -35,26 +36,27 @@ export default function Home() {
             그대로 베끼는 목록이 아니라 우리 수업에 맞는 아이디어를 찾는 출발점입니다.
           </p>
           <div className="heroActions">
-            <Link className="primaryAction" href="/cases">다른 학교 사례 찾아보기</Link>
-            <Link className="secondaryAction" href="/references">유형별 아이디어 보기</Link>
+            <Link className="primaryAction" href="/cases">1·2학기 사례 찾아보기</Link>
+            <Link className="secondaryAction" href="/standards">성취기준으로 과제 비교</Link>
           </div>
           <p className="pilotNote"><span aria-hidden="true">●</span> 2015·2022 개정 수학 과목의 수행평가 사례를 탐색합니다.</p>
+          <InstallApp />
         </div>
 
-        <aside className="evidencePanel" aria-label="현재 데이터 기준선">
+        <aside className="evidencePanel homeDesignExamples" aria-labelledby="home-design-title">
           <div className="panelTopline">
-            <span>검증된 데이터 기준선</span>
-            <strong>2026.08</strong>
+            <span>유형별 설계 참고</span>
+            <strong>2학기 미적분Ⅰ</strong>
           </div>
-          <dl className="metricList">
-            {metrics.map((metric) => (
-              <div key={metric.label}>
-                <dt>{metric.label}</dt>
-                <dd>{metric.value}</dd>
-              </div>
+          <h2 id="home-design-title">주제와 방법을 조합해 보세요</h2>
+          <ul>
+            {examples.map(({ topic, method, search }) => (
+              <li key={search}>
+                <Link href={`/references?${search}`}>{topic} <span>×</span> {method}<span aria-hidden="true">↗</span></Link>
+              </li>
             ))}
-          </dl>
-          <p>2026년 8월 원문·과목 경계·개인정보 검토를 통과한 공개 자료 기준입니다. 전국 학교 전수나 과목 개설 현황을 뜻하지 않습니다.</p>
+          </ul>
+          <p>조합을 고르면 실제 수행평가와 분류 근거를 함께 볼 수 있습니다.</p>
         </aside>
       </section>
 

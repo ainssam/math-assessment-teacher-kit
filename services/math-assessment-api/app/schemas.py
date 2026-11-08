@@ -145,6 +145,15 @@ class CaseDetailResponse(StrictModel):
     items: list[AssessmentItemSummary]
 
 
+class SourceTablePreview(StrictModel):
+    page_context: bool = False
+    rendered_from_hangul: bool = False
+    url: str
+    page: int = Field(ge=1)
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+
+
 class AssessmentItemDetail(AssessmentItemSummary):
     case_id: str
     curriculum: str
@@ -156,6 +165,13 @@ class AssessmentItemDetail(AssessmentItemSummary):
     source_url: str
     source_html: str
     rubric_html: str
+    source_previews: list[SourceTablePreview] = Field(default_factory=list)
+    rubric_previews: list[SourceTablePreview] = Field(default_factory=list)
+    source_preview_table_keys: list[str] = Field(default_factory=list)
+    rubric_preview_table_keys: list[str] = Field(default_factory=list)
+    source_excerpt_covered: bool = False
+    rubric_excerpt_covered: bool = False
+    source_notes: list[str] = Field(default_factory=list)
 
 
 class CuratedAssessmentItem(AssessmentItemSummary):
@@ -184,6 +200,65 @@ class ReferencePageResponse(StrictModel):
     items: list[CuratedAssessmentItem]
     total: int
     interpretation: str
+
+
+class DesignTag(StrictModel):
+    axis: str
+    tag: str
+    source_field: str
+    evidence: str
+
+
+class AchievementStandard(StrictModel):
+    curriculum: str
+    key: str
+    code: str
+    subject: str
+    text: str
+    count: int
+
+
+class StandardReferenceItem(StrictModel):
+    item_id: str
+    case_id: str
+    title: str
+    overview: str
+    method: str
+    school_name: str
+    region: str
+    academic_years: list[int]
+    semesters: list[int]
+    has_rubric: bool
+    standards: list[str]
+
+
+class StandardReferenceResponse(StrictModel):
+    curriculum: str
+    subject: str
+    standard: AchievementStandard | None
+    standards: list[AchievementStandard]
+    total: int
+    source_url: str
+    items: list[StandardReferenceItem]
+
+
+class DesignReferenceItem(StrictModel):
+    item_id: str
+    case_id: str
+    title: str
+    school_name: str
+    region: str
+    has_rubric: bool
+    tags: list[DesignTag]
+
+
+class DesignReferenceResponse(StrictModel):
+    available: bool
+    indexed_items: int
+    total: int
+    topics: dict[str, int]
+    methods: dict[str, int]
+    items: list[DesignReferenceItem]
 
 
 class ProductMetadata(StrictModel):

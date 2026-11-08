@@ -17,7 +17,7 @@ const DEFAULT_CURRICULUM = "2022";
 const DEFAULT_SUBJECT = "대수";
 
 function safeCurriculum(value: string | null) {
-  return value === "2015" || value === "2022" ? value : DEFAULT_CURRICULUM;
+  return value === "2015" || value === "2022" || value === "shared" ? value : DEFAULT_CURRICULUM;
 }
 
 function percentage(value: number, total: number) {
@@ -45,7 +45,7 @@ export default function TrendsExplorer() {
   useEffect(() => {
     const controller = new AbortController();
     fetchCatalog<SubjectListResponse>("subjects", controller.signal)
-      .then((payload) => setSubjects(payload.items.filter((item) => item.curriculum !== "shared")))
+      .then((payload) => setSubjects(payload.items))
       .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
     return () => controller.abort();
   }, []);
@@ -96,6 +96,7 @@ export default function TrendsExplorer() {
 
   const maximumTagCount = Math.max(...(trend?.action_tags.map((item) => item.documents) ?? [1]));
   const caseLink = `/cases?${apiParameters({ curriculum, subject })}`;
+  const curriculumLabel = curriculum === "shared" ? "교육과정 확인 필요" : `${curriculum} 개정`;
 
   return (
     <main id="main-content" className="catalogPage">
@@ -104,7 +105,7 @@ export default function TrendsExplorer() {
           <p className="breadcrumb"><Link href="/">홈</Link><span>/</span>공개자료 경향</p>
           <h1 id="trends-title">과목별 수행평가 경향</h1>
         </div>
-        <p><strong>8,800</strong><span>수집 정규화 사례</span></p>
+        <p><strong>{subjects.length ? subjects.reduce((total, item) => total + item.documents, 0).toLocaleString() : "—"}</strong><span>보존된 학교·과목 사례</span></p>
       </header>
 
       <section className="filterDock" aria-labelledby="course-filter-title">
@@ -123,6 +124,7 @@ export default function TrendsExplorer() {
             <select value={curriculum} onChange={(event) => changeCurriculum(event.target.value)}>
               <option value="2015">2015 개정</option>
               <option value="2022">2022 개정</option>
+              <option value="shared">교육과정 확인 필요</option>
             </select>
           </label>
           <label className="wideControl">
@@ -138,7 +140,7 @@ export default function TrendsExplorer() {
         </div>
         <div className="activeFilters" aria-label="현재 선택">
           <span>현재 선택</span>
-          <strong>{curriculum} 개정</strong>
+          <strong>{curriculumLabel}</strong>
           <strong>{subject}</strong>
         </div>
       </section>
@@ -211,22 +213,23 @@ export default function TrendsExplorer() {
           <section className="coverageSection" aria-labelledby="coverage-title">
             <div className="sectionLabel">
               <span className="stepPill">3</span>
-              <div><h2 id="coverage-title">학교별 확인 상태</h2><p>공개계획 확인 대상 2,407개 학교 × 교육과정 × 과목 확인표 기준</p></div>
+              <div><h2 id="coverage-title">학교별 확인 상태</h2><p>학교·교육과정·과목별 공개계획 확인표 기준</p></div>
             </div>
+            {trend.coverage.found == null ? <p className="cardCaution">학교별 확인 상태는 아직 집계되지 않았습니다.</p> : null}
             <div className="coverageGrid">
-              <div className="coveragePrimary"><span>평가계획에서 발견</span><strong>{(trend.coverage.found ?? 0).toLocaleString()}</strong><small>학교</small></div>
+              <div className="coveragePrimary"><span>평가계획에서 발견</span><strong>{(trend.coverage.found ?? "—").toLocaleString()}</strong><small>학교</small></div>
               <dl>
-                <div><dt>교육과정 판별 유보</dt><dd>{(trend.coverage.found_curriculum_ambiguous ?? 0).toLocaleString()}</dd></div>
-                <div><dt>평가계획에서 미검출</dt><dd>{(trend.coverage.not_found_in_collected_plans ?? 0).toLocaleString()}</dd></div>
-                <div><dt>개설 여부 미확인</dt><dd>{(trend.coverage.offering_unknown ?? 0).toLocaleString()}</dd></div>
-                <div><dt>추출 실패</dt><dd>{(trend.coverage.extraction_failed ?? 0).toLocaleString()}</dd></div>
+                <div><dt>교육과정 판별 유보</dt><dd>{(trend.coverage.found_curriculum_ambiguous ?? "—").toLocaleString()}</dd></div>
+                <div><dt>평가계획에서 미검출</dt><dd>{(trend.coverage.not_found_in_collected_plans ?? "—").toLocaleString()}</dd></div>
+                <div><dt>개설 여부 미확인</dt><dd>{(trend.coverage.offering_unknown ?? "—").toLocaleString()}</dd></div>
+                <div><dt>추출 실패</dt><dd>{(trend.coverage.extraction_failed ?? "—").toLocaleString()}</dd></div>
               </dl>
             </div>
             <div className="interpretationNote"><strong>해석 주의</strong><p>{caution}</p></div>
           </section>
 
           <section className="nextActionCard">
-            <div><p className="eyebrow">다음 단계</p><h2>숫자 뒤에 있는 실제 사례를 살펴보세요</h2><p>{curriculum} 개정 {subject} 사례에서 과제명, 활동 표지, 평가 근거를 비교합니다.</p></div>
+            <div><p className="eyebrow">다음 단계</p><h2>숫자 뒤에 있는 실제 사례를 살펴보세요</h2><p>{curriculumLabel} · {subject} 사례에서 과제명, 활동 표지, 평가 근거를 비교합니다.</p></div>
             <Link href={caseLink}>{subject} 사례 보기 <span aria-hidden="true">→</span></Link>
           </section>
         </>

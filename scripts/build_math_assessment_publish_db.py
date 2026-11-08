@@ -1572,6 +1572,7 @@ def main() -> None:
         connection = sqlite3.connect(temp_path)
         connection.execute("PRAGMA journal_mode = OFF")
         connection.execute("PRAGMA synchronous = OFF")
+        connection.execute("PRAGMA cache_size = -65536")
         connection.executescript(SCHEMA_SQL)
         subject_count = insert_subjects(connection, trends, coverage)
         reusable = load_reusable_cases(args.reuse_case_db, connection) if args.reuse_case_db else None

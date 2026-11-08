@@ -30,6 +30,5 @@
   },
   "devDependencies": {
     "kordoc": "3.13.0"
-  },
-  "license": "MIT"
+  }
 }

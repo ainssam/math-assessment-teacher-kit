@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
-import ReferenceExplorer from "./ReferenceExplorer";
+import ReferenceView from "./ReferenceView";
 
 export const metadata: Metadata = {
   title: "유형별 설계 참고",
@@ -9,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function ReferencesPage() {
-  return <Suspense fallback={<div className="routeLoading">유형별 설계 참고를 준비하고 있습니다.</div>}><ReferenceExplorer /></Suspense>;
+  return <Suspense fallback={<div className="routeLoading">설계 참고 사례를 불러오고 있습니다.</div>}><ReferenceView /></Suspense>;
 }
