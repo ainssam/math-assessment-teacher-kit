@@ -39,6 +39,7 @@ const navigation = [
   { href: "/references", label: "유형별 설계 참고" },
   { href: "/cases", label: "전체 라이브러리" },
   { href: "/guide", label: "사용설명서" },
+  { href: "/guide#ai-connection", label: "AI 연결 안내" },
   { href: "/sources", label: "자료 안내" },
 ];
 
@@ -73,7 +74,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <nav aria-label="주요 메뉴">
               <ul className="mainNav">
                 {navigation.map((item) => (
-                  <li key={item.href}><Link href={item.href}>{item.label}</Link></li>
+                  <li key={item.href}><Link href={item.href} className={item.href === "/guide#ai-connection" ? "aiGuideNav" : undefined}>{item.label}</Link></li>
                 ))}
               </ul>
             </nav>

@@ -32,6 +32,17 @@ export default function GuidePage() {
       <Link href="/references">유형별 참고 사례 보기 →</Link>
     </section>
 
+    <section id="ai-connection" className="aiConnectionGuide" aria-labelledby="ai-connection-title">
+      <h2 id="ai-connection-title">내 AI에서 수행평가를 찾아보고 비교하세요</h2>
+      <p>ChatGPT나 Claude에 아카이브를 연결하면 실제 수행 내용, 채점표와 성취기준을 조회하며 질문할 수 있습니다. 주소 등록부터 첫 조회까지 화면 순서대로 안내합니다.</p>
+      <div className="aiConnectionActions">
+        <a className="secondaryAction" href="https://github.com/ainssam/math-assessment-teacher-kit/blob/main/docs/CHATGPT_MCP_GUIDE.md" target="_blank" rel="noopener noreferrer" aria-label="ChatGPT 연결 방법 (GitHub, 새 탭)">ChatGPT 연결 방법</a>
+        <a className="secondaryAction" href="https://github.com/ainssam/math-assessment-teacher-kit/blob/main/docs/CLAUDE_MCP_GUIDE.md" target="_blank" rel="noopener noreferrer" aria-label="Claude 연결 방법 (GitHub, 새 탭)">Claude 연결 방법</a>
+      </div>
+      <p className="aiConnectionNote">GitHub의 상세 안내가 새 탭으로 열립니다. 설치 없이 연결할 수 있으며, 메뉴 제공과 이용 한도는 AI 계정에 따라 다릅니다.</p>
+      <a className="aiConnectionMore" href="https://github.com/ainssam/math-assessment-teacher-kit/blob/main/docs/TEACHER_AI_GUIDE.md" target="_blank" rel="noopener noreferrer" aria-label="연결 확인·수업용 질문·문제 해결 안내 (GitHub, 새 탭)">연결 확인·수업용 질문·문제 해결 안내</a>
+    </section>
+
     <section className="guideWorkflow" aria-labelledby="guide-workflow-title">
       <div className="sectionLabel"><span className="stepPill">이용 순서</span><div><h2 id="guide-workflow-title">두 라이브러리와 보조 도구의 역할</h2><p>찾기·원문 확인·개인 판단을 서로 섞지 않도록 나눴습니다.</p></div></div>
       <ol>{workflow.map((step) => <li key={step.number}><span>{step.number}</span><div><h3>{step.title}</h3><p>{step.description}</p><Link href={step.href}>{step.link} →</Link></div></li>)}</ol>

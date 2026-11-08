@@ -39,6 +39,10 @@ export default function Home() {
             <Link className="primaryAction" href="/cases">1·2학기 사례 찾아보기</Link>
             <Link className="secondaryAction" href="/standards">성취기준으로 과제 비교</Link>
           </div>
+          <p className="homeAiGuide">
+            <Link className="aiGuideLink" href="/guide#ai-connection">AI 연결 안내</Link>
+            <span>ChatGPT·Claude로 사례를 조사하고 비교하세요.</span>
+          </p>
           <p className="pilotNote"><span aria-hidden="true">●</span> 2015·2022 개정 수학 과목의 수행평가 사례를 탐색합니다.</p>
           <InstallApp />
         </div>
