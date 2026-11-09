@@ -67,6 +67,12 @@ export MATH_ASSESSMENT_DETAIL_DB="$MATH_ASSESSMENT_PUBLISH_DB"
 pnpm dev
 ```
 
+## 전과목 협업에 참여하기
+
+수학에서 쓰는 검색·필터, 원문 표, 비교 화면과 MCP를 바탕으로 다른 교과도 함께 준비합니다. 오류 제보나 한 과목의 평가 유형 정리부터 참여할 수 있습니다.
+
+[기여 방법](CONTRIBUTING.md) · [일반 제보](https://github.com/ainssam/math-assessment-teacher-kit/issues) · [비공개 보안 신고](SECURITY.md)
+
 ## 자기 교과 자료로 적용하기
 
 | 하고 싶은 일 | 읽을 곳 |
