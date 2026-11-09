@@ -2,8 +2,11 @@ packages:
   - "apps/*"
 
 overrides:
-  postcss: 8.5.19
-  sharp: 0.35.3
+  postcss: 8.5.32
+  sharp: 0.35.5
+  # Scope security overrides to the development tools that need them.
+  "onnxruntime-node>adm-zip": 0.6.1
+  "@typescript-eslint/typescript-estree>minimatch": 11.0.5
 
 allowBuilds:
   esbuild: true
