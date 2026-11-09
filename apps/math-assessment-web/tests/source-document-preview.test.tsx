@@ -50,7 +50,7 @@ describe("원문 표 이미지", () => {
     render(<SourceDocumentHtml html={html} />);
     expect(screen.getByText("근거를 설명함")).toBeVisible();
     expect(screen.queryByText("추출 표 함께 보기")).toBeNull();
-    expect(screen.getByRole("button", { name: "전체 화면", exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^전체 화면$/ })).toBeVisible();
   });
 
   it("미복원 수식은 알리고 원문으로 복원한 표의 숨긴 추출문은 경고하지 않는다", () => {
