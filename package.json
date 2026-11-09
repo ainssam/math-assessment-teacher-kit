@@ -29,6 +29,6 @@
     "node": ">=24.0.0"
   },
   "devDependencies": {
-    "kordoc": "3.13.0"
+    "kordoc": "4.24.48"
   }
 }
